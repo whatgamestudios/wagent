@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import textwrap
 from collections import defaultdict
 from datetime import date
 from pathlib import Path
@@ -34,14 +35,14 @@ words), suitable for a newspaper.
 
 Cover: the seed word and game day, how many players reached the best score and
 what that score was, and any standout obscure or "WOW" (9+ letter) words that
-were played.
+were played. If no "WOW" words were used, don't mention this. If no obscure words
+were used, don't mention this. 
 
 From the "notable_words" list, choose exactly one OBSCURE-tier word (pick the
 one you are most confident you know the real meaning of) and give it its own
 short paragraph: state the word, and briefly describe its definition in plain
-English. Only do this for one word — do not attempt to define every obscure
-word. If you are not confident of a word's real meaning, say so plainly instead
-of guessing, or pick a different obscure word you are more confident about.
+English. If you are not confident of a word's real meaning, say so plainly 
+instead of guessing, or pick a different obscure word you are more confident about.
 
 The "shared_words" field is the authoritative list of words used by more than
 one player — it may be empty. Only mention a word as being independently
@@ -55,7 +56,18 @@ Do not invent facts, definitions you are unsure of, or details absent from the
 JSON. Write in a factual, engaging journalistic style. Do not list raw stats or
 JSON — turn them into prose. Output only the press release text, no title or
 preamble.
+
+Do not mention the names of players. Just used words such as "one player", and 
+"another player".
+
+Use the term "game day", and not just "day".
 """
+
+
+def wrap_text(text: str, width: int = 80) -> str:
+    """Word-wrap text at `width` columns, preserving paragraph breaks."""
+    paragraphs = text.strip().split("\n\n")
+    return "\n\n".join(textwrap.fill(p.strip(), width=width) for p in paragraphs if p.strip())
 
 
 def find_shared_words(players: list[dict], seed_word: str) -> dict[str, list[str]]:
@@ -133,6 +145,7 @@ def build_press_release(
     summary = chain.invoke(
         {"facts": json.dumps(facts, indent=2), "shared_note": shared_note}
     ).strip()
+    summary = wrap_text(summary)
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
