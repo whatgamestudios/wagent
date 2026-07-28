@@ -103,7 +103,7 @@ def build_press_release(
         "num_submissions": data["num_submissions"],
         "best_score": data["best_score"],
         "players": [
-            {"player": p["player"], "score": p["score"], "words": p["word_scores"]}
+            {"score": p["score"], "words": p["word_scores"]}
             for p in players
         ],
         "shared_words": shared_words,
