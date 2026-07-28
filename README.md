@@ -19,7 +19,7 @@ cp .env.example .env   # then edit .env for your chosen LLM provider
 
 ## Running it
 
-Generate today's press release (defaults to the server's current game day, and to a local Ollama model):
+Generate today's press release (defaults to the server's current game day, and to a local Ollama model using gemma4:31b):
 
 ```bash
 python -m worcadian_agent.agent
@@ -30,7 +30,7 @@ Options:
 ```bash
 python -m worcadian_agent.agent --day 120                        # report on a specific game day
 python -m worcadian_agent.agent --provider anthropic              # use remote Claude instead of Ollama
-python -m worcadian_agent.agent --provider ollama --model llama3.1  # pick a specific Ollama model
+python -m worcadian_agent.agent --provider ollama --model gemma4:31b  # pick a specific Ollama model
 python -m worcadian_agent.agent --output-dir output               # where the .txt file is written
 ```
 
@@ -40,10 +40,26 @@ Output is written to `output/<game_day>-<date>.txt`, e.g. `output/120-2026-07-28
 
 Requires a local [Ollama](https://ollama.com) server running with a pulled model:
 
+
+```bash
+ollama pull gemma4:31b
+python -m worcadian_agent.agent --provider ollama --model gemma4:31b
+```
+
+or 
+
 ```bash
 ollama pull llama3.1
 python -m worcadian_agent.agent --provider ollama --model llama3.1
 ```
+
+or 
+
+```bash
+ollama pull mistral 
+python -m worcadian_agent.agent --provider ollama --model mistral 
+```
+
 
 ### Using Claude
 
