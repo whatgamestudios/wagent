@@ -1,0 +1,6 @@
+requests
+wordfreq
+langchain-core
+langchain-ollama
+langchain-anthropic
+python-dotenv
