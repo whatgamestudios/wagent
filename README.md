@@ -1,12 +1,11 @@
 # Worcadian Daily Press Release Agent
 
-Generates a daily newspaper-style press release about the [Worcadian](https://worcadian.vercel.app/) word
-puzzle: it fetches today's seed word and best submissions from the live game server, scores how obscure
+Generates a daily newspaper-style press release about the [Worcadian](https://whatgamestudios.com/worcadian/) 
+word puzzle: it fetches today's seed word and best submissions from the live game server, scores how obscure
 the words played are, checks whether players independently found the same words, and uses an LLM
 (local Ollama or remote Claude) to write a ~500-word summary.
 
-For how it's built — architecture, diagram, what each script does, and known limitations — see
-[DESIGN.md](DESIGN.md).
+For how it's built: see [DESIGN.md](DESIGN.md).
 
 ## Setup
 
