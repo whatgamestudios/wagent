@@ -30,6 +30,7 @@ GAME_WORDLIST_URL = (
 GAME_WORDLIST_CACHE = Path(__file__).resolve().parent.parent / "data" / "game_words.txt"
 
 WOW_MIN_LENGTH = 9
+IGNORE_MAX_LENGTH = 2
 UNCOMMON_ZIPF_CEILING = 3.0
 
 
@@ -37,7 +38,7 @@ def score_word(word: str) -> dict:
     """Score a single word's obscurity.
 
     Returns {word, length, zipf, tier, obscurity_score}. tier is one of
-    WOW / OBSCURE / UNCOMMON / COMMON. obscurity_score is 0-100, higher = more obscure.
+    WOW / OBSCURE / UNCOMMON / COMMON / IGNORE. obscurity_score is 0-100, higher = more obscure.
     """
     upper = word.strip().upper()
     length = len(upper)
@@ -45,6 +46,8 @@ def score_word(word: str) -> dict:
 
     if length >= WOW_MIN_LENGTH:
         tier = "WOW"
+    elif length <= IGNORE_MAX_LENGTH:
+        tier = "IGNORE" 
     elif zipf == 0:
         tier = "OBSCURE"
     elif zipf < UNCOMMON_ZIPF_CEILING:
@@ -54,6 +57,7 @@ def score_word(word: str) -> dict:
 
     base_score = max(0, min(100, round((7 - zipf) / 7 * 100)))
     obscurity_score = max(base_score, 85) if tier == "WOW" else base_score
+    obscurity_score = obscurity_score if tier != "IGNORE" else 0
 
     return {
         "word": upper,
