@@ -1,18 +1,5 @@
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-
-# Virtual environment
-.venv/
-
 # Environment secrets
 .env
-
-# Downloaded/cached game word list
-data/
-
-temp/
 
 # OS cruft
 .DS_Store

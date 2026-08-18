@@ -1,5 +1,7 @@
 requests
 wordfreq
+Pillow
+google-genai
 langchain-core
 langchain-ollama
 langchain-anthropic

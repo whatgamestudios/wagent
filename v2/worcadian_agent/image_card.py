@@ -1,0 +1,262 @@
+"""Render a word + meaning as an Instagram-ready graphic card.
+
+No AI image generation involved: this composites the word and its meaning onto
+a templated parchment/newspaper-style card using Pillow, matching the game's
+press-release aesthetic. Defaults to a 1080x1080 square (Instagram feed); pass
+--width/--height for other formats (e.g. 1080x1350 portrait).
+
+Standalone usage:
+    python -m worcadian_agent.image_card GROWTH "the process of increasing in size"
+    python -m worcadian_agent.image_card ZYTHUM "an ancient Egyptian fermented beer" --output-dir output
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from datetime import date
+from pathlib import Path
+
+from PIL import Image, ImageDraw, ImageFont
+
+BACKGROUND = (242, 233, 216)  # parchment
+INK = (43, 36, 32)  # near-black brown
+ACCENT = (150, 104, 45)  # aged gold, used for rules/kicker/footer
+
+# Georgia ships with macOS; DejaVu Serif is the common Linux fallback. Pass
+# --font-dir (a folder with regular.ttf/bold.ttf/italic.ttf) to override.
+_FONT_CANDIDATES = {
+    "regular": [
+        "/System/Library/Fonts/Supplemental/Georgia.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
+    ],
+    "bold": [
+        "/System/Library/Fonts/Supplemental/Georgia Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf",
+    ],
+    "italic": [
+        "/System/Library/Fonts/Supplemental/Georgia Italic.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Italic.ttf",
+    ],
+}
+
+_warned_missing_font = False
+
+
+def _find_font(style: str, font_dir: str | Path | None) -> str | None:
+    if font_dir is not None:
+        for name in (f"{style}.ttf", f"{style}.otf"):
+            candidate = Path(font_dir) / name
+            if candidate.exists():
+                return str(candidate)
+    for path in _FONT_CANDIDATES[style]:
+        if Path(path).exists():
+            return path
+    return None
+
+
+def _load_font(style: str, size: int, font_dir: str | Path | None) -> ImageFont.FreeTypeFont:
+    path = _find_font(style, font_dir)
+    if path is None:
+        global _warned_missing_font
+        if not _warned_missing_font:
+            print(
+                f"warning: no {style} TrueType font found; falling back to PIL's tiny "
+                "built-in bitmap font. Pass --font-dir with regular.ttf/bold.ttf/italic.ttf "
+                "for a legible card.",
+                file=sys.stderr,
+            )
+            _warned_missing_font = True
+        return ImageFont.load_default()
+    return ImageFont.truetype(path, size)
+
+
+def _text_width(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont) -> int:
+    box = draw.textbbox((0, 0), text, font=font)
+    return box[2] - box[0]
+
+
+def _fit_font(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    style: str,
+    max_width: int,
+    font_dir: str | Path | None,
+    start_size: int,
+    min_size: int,
+) -> ImageFont.FreeTypeFont:
+    """Shrink font size (in steps of 4px) until `text` fits within `max_width`."""
+    size = start_size
+    font = _load_font(style, size, font_dir)
+    while size > min_size and _text_width(draw, text, font) > max_width:
+        size -= 4
+        font = _load_font(style, size, font_dir)
+    return font
+
+
+def _wrap_to_width(
+    draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont, max_width: int
+) -> list[str]:
+    """Greedy word-wrap measured in rendered pixel width, not character count."""
+    words = text.split()
+    lines: list[str] = []
+    current = ""
+    for word in words:
+        candidate = f"{current} {word}".strip()
+        if not current or _text_width(draw, candidate, font) <= max_width:
+            current = candidate
+        else:
+            lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    return lines
+
+
+def _fit_wrapped_text(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    style: str,
+    max_width: int,
+    max_height: float,
+    font_dir: str | Path | None,
+    start_size: int,
+    min_size: int = 18,
+) -> tuple[ImageFont.FreeTypeFont, list[str], float]:
+    """Shrink font size until the wrapped block of `text` fits within max_height."""
+    size = start_size
+    while True:
+        font = _load_font(style, size, font_dir)
+        lines = _wrap_to_width(draw, text, font, max_width)
+        line_height = draw.textbbox((0, 0), "Ag", font=font)[3] * 1.4
+        if line_height * len(lines) <= max_height or size <= min_size:
+            return font, lines, line_height
+        size -= 2
+
+
+def _draw_centered(
+    draw: ImageDraw.ImageDraw,
+    y: float,
+    text: str,
+    font: ImageFont.FreeTypeFont,
+    fill: tuple[int, int, int],
+    canvas_width: int,
+    tracking: int = 0,
+) -> None:
+    """Draw `text` horizontally centered at height `y`; `tracking` adds letter-spacing."""
+    if tracking:
+        widths = [_text_width(draw, ch, font) for ch in text]
+        total_width = sum(widths) + tracking * (len(text) - 1)
+        x = (canvas_width - total_width) / 2
+        for ch, w in zip(text, widths):
+            draw.text((x, y), ch, font=font, fill=fill)
+            x += w + tracking
+    else:
+        width = _text_width(draw, text, font)
+        draw.text(((canvas_width - width) / 2, y), text, font=font, fill=fill)
+
+
+def generate_word_card(
+    word: str,
+    meaning: str,
+    output_path: str | Path,
+    width: int = 1080,
+    height: int = 1080,
+    font_dir: str | Path | None = None,
+    kicker: str = "WORCADIAN · WORD OF THE DAY",
+    footer: str | None = None,
+) -> Path:
+    """Render `word` and `meaning` onto a parchment card and save it as a PNG."""
+    img = Image.new("RGB", (width, height), BACKGROUND)
+    draw = ImageDraw.Draw(img)
+
+    margin = round(width * 0.09)
+    inner_margin = margin + round(width * 0.02)
+    content_width = width - 2 * inner_margin
+
+    draw.rectangle([margin, margin, width - margin, height - margin], outline=ACCENT, width=3)
+    draw.rectangle(
+        [margin + 10, margin + 10, width - margin - 10, height - margin - 10],
+        outline=ACCENT,
+        width=1,
+    )
+
+    y = margin + round(height * 0.07)
+
+    kicker_font = _load_font("regular", round(width * 0.024), font_dir)
+    _draw_centered(draw, y, kicker, kicker_font, ACCENT, width, tracking=round(width * 0.006))
+    y += round(height * 0.05)
+
+    draw.line([(width / 2 - 60, y), (width / 2 + 60, y)], fill=ACCENT, width=2)
+    y += round(height * 0.055)
+
+    word_text = word.strip().upper()
+    word_font = _fit_font(
+        draw, word_text, "bold", content_width, font_dir,
+        start_size=round(width * 0.16), min_size=round(width * 0.05),
+    )
+    word_height = draw.textbbox((0, 0), word_text, font=word_font)[3]
+    _draw_centered(draw, y, word_text, word_font, INK, width)
+    y += word_height + round(height * 0.05)
+
+    draw.line([(width / 2 - 40, y), (width / 2 + 40, y)], fill=ACCENT, width=2)
+    y += round(height * 0.055)
+
+    footer_text = footer or f"worcadian · {date.today():%B %d, %Y}"
+    footer_font = _load_font("regular", round(width * 0.02), font_dir)
+    footer_y = height - margin - round(height * 0.06)
+
+    available_height = footer_y - round(height * 0.03) - y
+    meaning_font, meaning_lines, line_height = _fit_wrapped_text(
+        draw, meaning.strip(), "italic", content_width, available_height, font_dir,
+        start_size=round(width * 0.032),
+    )
+    for line in meaning_lines:
+        _draw_centered(draw, y, line, meaning_font, INK, width)
+        y += line_height
+
+    _draw_centered(draw, footer_y, footer_text, footer_font, ACCENT, width, tracking=round(width * 0.003))
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    img.save(output_path, "PNG")
+    return output_path
+
+
+def _main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("word", help="The word to feature")
+    parser.add_argument("meaning", help="A short definition/meaning of the word")
+    parser.add_argument("--output-dir", default="output", help="Where to write the PNG (default: output)")
+    parser.add_argument("--output", default=None, help="Explicit output file path (overrides --output-dir)")
+    parser.add_argument("--width", type=int, default=1080)
+    parser.add_argument("--height", type=int, default=1080)
+    parser.add_argument(
+        "--font-dir", default=None,
+        help="Directory with regular.ttf/bold.ttf/italic.ttf to use instead of system fonts",
+    )
+    parser.add_argument("--kicker", default="WORCADIAN · WORD OF THE DAY")
+    parser.add_argument("--footer", default=None, help="Override the footer text (default: today's date)")
+    args = parser.parse_args()
+
+    if args.output:
+        out_path = Path(args.output)
+    else:
+        filename = f"{args.word.strip().upper()}-{date.today().isoformat()}.png"
+        out_path = Path(args.output_dir) / filename
+
+    path = generate_word_card(
+        args.word,
+        args.meaning,
+        out_path,
+        width=args.width,
+        height=args.height,
+        font_dir=args.font_dir,
+        kicker=args.kicker,
+        footer=args.footer,
+    )
+    print(f"Wrote {path}")
+
+
+if __name__ == "__main__":
+    _main()
