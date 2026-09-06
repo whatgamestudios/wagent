@@ -1,53 +1,78 @@
 """Score how obscure a word is.
 
 Signal sources:
-  - Word length: Worcadian's own rule of thumb — 9+ letter words are "WOW" regardless
-    of how common they are, since building a 9+ letter chain off the seed is hard.
-  - `wordfreq` (https://github.com/rspeer/wordfreq, MIT licensed): an open-source
-    library giving Zipf frequency of a word across real-world English corpora
-    (Wikipedia, subtitles, news, books, Reddit, Twitter). A word absent from all of
-    those corpora is very likely an archaic or highly technical dictionary entry —
-    exactly the kind of word Worcadian's lore describes ("some words are old...").
+  - Word length: Worcadian's own rule of thumb — 9+ letter words are "WOW"
+    regardless of how common they are, since building a 9+ letter chain off
+    the seed is hard.
+  - A precomputed Zipf-frequency lookup table (word_zipf.tsv.gz), covering
+    every word in Worcadian's own game vocabulary, built offline from
+    `wordfreq` (https://github.com/rspeer/wordfreq, MIT licensed) by
+    scripts/build_word_cache.py. A word with zipf == 0 in the table is
+    absent from all of wordfreq's real-world English corpora and is very
+    likely an archaic or highly technical dictionary entry — exactly the
+    kind of word Worcadian's lore describes ("some words are old...").
+
+    Shipping this small precomputed table instead of the `wordfreq` package
+    itself avoids ~58MB of frequency data for ~30 languages this game never
+    uses (wordfreq's own English-only data is ~1.5MB of that) — a
+    significant chunk of Vercel's 250MB unzipped function-size limit for a
+    capability only ever used in English here.
+
+  - A word absent from the lookup table entirely (not part of Worcadian's
+    own game vocabulary, so no frequency signal is available for it) is
+    treated as an ordinary COMMON word rather than as an error.
 
 Standalone usage:
     python -m worcadian_agent.word_obscurity WORD1 WORD2 ...
-    python -m worcadian_agent.word_obscurity --calibrate
+
+To rebuild the lookup table after Worcadian's game word list changes, see
+scripts/build_word_cache.py.
 """
 
 from __future__ import annotations
 
 import argparse
-import statistics
-import urllib.request
+import gzip
+from functools import lru_cache
 from pathlib import Path
 
-from wordfreq import zipf_frequency
-
-GAME_WORDLIST_URL = (
-    "https://raw.githubusercontent.com/whatgamestudios/crosswords/main/"
-    "CrossWords/Assets/Resources/wordlists/game_words.txt"
-)
-GAME_WORDLIST_CACHE = Path(__file__).resolve().parent.parent / "data" / "game_words.txt"
+WORD_ZIPF_CACHE_PATH = Path(__file__).resolve().parent / "word_zipf.tsv.gz"
 
 WOW_MIN_LENGTH = 9
 IGNORE_MAX_LENGTH = 2
 UNCOMMON_ZIPF_CEILING = 3.0
 
 
+@lru_cache(maxsize=1)
+def _word_zipf_cache() -> dict[str, float]:
+    """Load the precomputed word -> Zipf-frequency lookup table (once per process)."""
+    cache: dict[str, float] = {}
+    with gzip.open(WORD_ZIPF_CACHE_PATH, "rt") as f:
+        for line in f:
+            word, _, zipf = line.rstrip("\n").partition("\t")
+            if word:
+                cache[word] = float(zipf)
+    return cache
+
+
 def score_word(word: str) -> dict:
     """Score a single word's obscurity.
 
     Returns {word, length, zipf, tier, obscurity_score}. tier is one of
-    WOW / OBSCURE / UNCOMMON / COMMON / IGNORE. obscurity_score is 0-100, higher = more obscure.
+    WOW / OBSCURE / UNCOMMON / COMMON / IGNORE. obscurity_score is 0-100,
+    higher = more obscure. zipf is None when the word isn't in the
+    precomputed lookup table, in which case it's treated as COMMON.
     """
     upper = word.strip().upper()
     length = len(upper)
-    zipf = zipf_frequency(upper.lower(), "en")
+    zipf = _word_zipf_cache().get(upper)
 
     if length >= WOW_MIN_LENGTH:
         tier = "WOW"
     elif length <= IGNORE_MAX_LENGTH:
-        tier = "IGNORE" 
+        tier = "IGNORE"
+    elif zipf is None:
+        tier = "COMMON"
     elif zipf == 0:
         tier = "OBSCURE"
     elif zipf < UNCOMMON_ZIPF_CEILING:
@@ -55,7 +80,7 @@ def score_word(word: str) -> dict:
     else:
         tier = "COMMON"
 
-    base_score = max(0, min(100, round((7 - zipf) / 7 * 100)))
+    base_score = max(0, min(100, round((7 - zipf) / 7 * 100))) if zipf is not None else 0
     obscurity_score = max(base_score, 85) if tier == "WOW" else base_score
     obscurity_score = obscurity_score if tier != "IGNORE" else 0
 
@@ -73,58 +98,18 @@ def score_words(words: list[str]) -> list[dict]:
     return sorted((score_word(w) for w in words), key=lambda d: d["obscurity_score"], reverse=True)
 
 
-def download_game_wordlist(path: Path = GAME_WORDLIST_CACHE) -> Path:
-    """Download and cache the full Worcadian game vocabulary (one word per line)."""
-    if not path.exists():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with urllib.request.urlopen(GAME_WORDLIST_URL, timeout=30) as resp:
-            path.write_bytes(resp.read())
-    return path
-
-
-def _calibrate() -> None:
-    """Print a zipf-frequency distribution over the full game word list.
-
-    This is what justifies the UNCOMMON_ZIPF_CEILING threshold above — run during
-    development, not on every scoring call.
-    """
-    path = download_game_wordlist()
-    words = [line.strip() for line in path.read_text().splitlines() if line.strip()]
-    zipfs = [zipf_frequency(w.lower(), "en") for w in words]
-    zero_count = sum(1 for z in zipfs if z == 0)
-
-    print(f"game word list: {len(words)} words")
-    print(f"zipf == 0 (absent from general corpora): {zero_count} ({zero_count / len(words):.1%})")
-    print(f"mean zipf:   {statistics.mean(zipfs):.2f}")
-    print(f"median zipf: {statistics.median(zipfs):.2f}")
-    nonzero = [z for z in zipfs if z > 0]
-    if nonzero:
-        print(f"mean zipf (excluding zeros): {statistics.mean(nonzero):.2f}")
-
-
 def _main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("words", nargs="*", help="Words to score")
-    parser.add_argument(
-        "--calibrate",
-        action="store_true",
-        help="Download the full game word list and print a zipf-frequency distribution",
-    )
+    parser.add_argument("words", nargs="+", help="Words to score")
     args = parser.parse_args()
-
-    if args.calibrate:
-        _calibrate()
-        return
-
-    if not args.words:
-        parser.error("provide one or more words, or use --calibrate")
 
     results = score_words(args.words)
     header = f"{'WORD':<15}{'LEN':>4}{'ZIPF':>7}{'TIER':>10}{'OBSCURITY':>11}"
     print(header)
     print("-" * len(header))
     for r in results:
-        print(f"{r['word']:<15}{r['length']:>4}{r['zipf']:>7.2f}{r['tier']:>10}{r['obscurity_score']:>11}")
+        zipf_display = f"{r['zipf']:.2f}" if r["zipf"] is not None else "?"
+        print(f"{r['word']:<15}{r['length']:>4}{zipf_display:>7}{r['tier']:>10}{r['obscurity_score']:>11}")
 
 
 if __name__ == "__main__":

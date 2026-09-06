@@ -12,9 +12,6 @@ __pycache__/
 # Vercel
 .vercel
 
-# Downloaded/cached game word list
-data/
-
 # Local output from running the CLI directly
 output/
 
