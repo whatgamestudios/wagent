@@ -6,6 +6,7 @@ API reference: https://github.com/whatgamestudios/gameserver/blob/main/API.md
 from __future__ import annotations
 
 import itertools
+import logging
 from typing import Any
 
 import requests
@@ -13,6 +14,8 @@ import requests
 RPC_URL = "https://worcadian.vercel.app/rpc"
 
 _id_counter = itertools.count(1)
+
+logger = logging.getLogger(__name__)
 
 
 def rpc(method: str, params: dict[str, Any] | None = None, timeout: float = 15.0) -> Any:
@@ -23,11 +26,18 @@ def rpc(method: str, params: dict[str, Any] | None = None, timeout: float = 15.0
         "params": params or {},
         "id": next(_id_counter),
     }
-    resp = requests.post(RPC_URL, json=payload, timeout=timeout)
-    resp.raise_for_status()
+    logger.info("rpc call method=%s params=%s", method, params)
+    try:
+        resp = requests.post(RPC_URL, json=payload, timeout=timeout)
+        resp.raise_for_status()
+    except requests.RequestException:
+        logger.exception("rpc call failed method=%s", method)
+        raise
     data = resp.json()
     if "error" in data:
+        logger.error("rpc method=%s returned an error: %s", method, data["error"])
         raise RuntimeError(f"{method} failed: {data['error']}")
+    logger.info("rpc ok method=%s", method)
     return data["result"]
 
 

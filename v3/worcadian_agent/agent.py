@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import textwrap
 from collections import defaultdict
 from datetime import date
@@ -28,6 +29,8 @@ from langchain_core.prompts import ChatPromptTemplate
 from worcadian_agent.fetch_today import fetch_today_data
 from worcadian_agent.llm_factory import get_llm
 from worcadian_agent.word_obscurity import score_words
+
+logger = logging.getLogger(__name__)
 
 LORE_PATH = Path(__file__).resolve().parent / "skills" / "worcadian_lore.md"
 
@@ -90,14 +93,21 @@ def build_press_release(
     model: str | None = None,
     output_dir: str | Path = "output",
 ) -> Path:
+    logger.info("build_press_release start day=%s provider=%s model=%s", day, provider, model)
+
     data = fetch_today_data(day)
     players = data["players"]
     seed = data["seed_word"]
+    logger.info(
+        "fetched game data game_day=%s seed_word=%s num_submissions=%s players=%d",
+        data["game_day"], seed, data["num_submissions"], len(players),
+    )
 
     dictionary_words = sorted(
         {word for p in players for word, ok in zip(p["words"], p["in_dictionary"]) if ok}
     )
     scores_by_word = {s["word"]: s for s in score_words(dictionary_words)}
+    logger.info("scored %d distinct dictionary words", len(dictionary_words))
 
     for p in players:
         p["word_scores"] = [
@@ -112,6 +122,7 @@ def build_press_release(
         key=lambda s: s["obscurity_score"],
         reverse=True,
     )
+    logger.info("shared_words=%d notable_words=%d", len(shared_words), len(notable_words))
 
     facts = {
         "game_day": data["game_day"],
@@ -146,9 +157,15 @@ def build_press_release(
 
     llm = get_llm(provider, model)
     chain = prompt | llm | StrOutputParser()
-    summary = chain.invoke(
-        {"facts": json.dumps(facts, indent=2), "shared_note": shared_note}
-    ).strip()
+    logger.info("invoking LLM chain")
+    try:
+        summary = chain.invoke(
+            {"facts": json.dumps(facts, indent=2), "shared_note": shared_note}
+        ).strip()
+    except Exception:
+        logger.exception("LLM chain invocation failed")
+        raise
+    logger.info("LLM returned %d characters", len(summary))
     summary = wrap_text(summary)
 
     output_dir = Path(output_dir)
@@ -156,6 +173,7 @@ def build_press_release(
     filename = f"{data['game_day']}-{date.today().isoformat()}.txt"
     out_path = output_dir / filename
     out_path.write_text(summary + "\n")
+    logger.info("build_press_release done path=%s", out_path)
 
     return out_path
 

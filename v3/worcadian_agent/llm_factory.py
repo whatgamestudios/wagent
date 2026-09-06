@@ -29,10 +29,13 @@ At least one slot must be configured (or --model passed explicitly).
 
 from __future__ import annotations
 
+import logging
 import os
 
 from langchain.chat_models import init_chat_model
 from langchain_core.language_models.chat_models import BaseChatModel
+
+logger = logging.getLogger(__name__)
 
 NUM_SLOTS = 5
 
@@ -74,15 +77,20 @@ def get_llm(provider: str | None = None, model: str | None = None) -> BaseChatMo
     env vars, in slot order.
     """
     if model:
+        logger.info("get_llm building explicit model=%s provider=%s", model, provider)
         return _build(model, api_key=None, explicit_provider=provider)
 
     llms = []
     for n in range(1, NUM_SLOTS + 1):
         model_name, api_key = _slot(n)
         if model_name:
+            logger.info("get_llm slot %d configured model=%s has_api_key=%s", n, model_name, bool(api_key))
             llms.append(_build(model_name, api_key))
+        else:
+            logger.info("get_llm slot %d not configured (MODEL_NAME_%d unset)", n, n)
 
     if not llms:
+        logger.error("get_llm: no MODEL_NAME_1..5 configured")
         raise RuntimeError(
             "No LLM model is configured. Set MODEL_NAME_1 (and optionally "
             "MODEL_API_KEY_1) through MODEL_NAME_5 / MODEL_API_KEY_5, or pass "
@@ -90,4 +98,5 @@ def get_llm(provider: str | None = None, model: str | None = None) -> BaseChatMo
         )
 
     primary, fallbacks = llms[0], llms[1:]
+    logger.info("get_llm primary=%s fallback_count=%d", type(primary).__name__, len(fallbacks))
     return primary.with_fallbacks(fallbacks) if fallbacks else primary
