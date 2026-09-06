@@ -1,5 +1,12 @@
 """FastAPI app deployed as a Vercel serverless function.
 
+Deliberately not named index.py: "index" is a special filename in Vercel's
+filesystem routing (it collapses to the parent path, the same way
+index.html does for static hosting), which made the rewrite destination
+genuinely ambiguous between "/api" and "/api/index" and cost real debugging
+time. "app.py" has no special meaning, so it can only ever route to exactly
+/api/app -- see vercel.json's "rewrites" entry, which must point there.
+
 Routes (see vercel.json for how /api/* is rewritten to this file):
     POST /api/press-release     build a press release on demand (used by the
                                  site's "Execute Daily Tasks" button)
@@ -98,7 +105,7 @@ def run_daily_tasks(authorization: str | None = Header(default=None)) -> dict:
     return {"status": "ok", **result}
 
 
-# Serves index.html for local dev (`uvicorn api.index:app`) so the page and
+# Serves index.html for local dev (`uvicorn api.app:app`) so the page and
 # API share an origin. In production Vercel serves index.html as a static
 # file directly and never reaches this app for "/", since vercel.json only
 # rewrites /api/* here — this mount is inert there.

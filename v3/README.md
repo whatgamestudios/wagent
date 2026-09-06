@@ -21,7 +21,7 @@ be emailed out automatically.
 
 ```
 v3/
-  api/index.py            FastAPI app (Vercel serverless function)
+  api/app.py              FastAPI app (Vercel serverless function)
   worcadian_agent/         the press-release pipeline (fetch data, score words,
                             call the LLM, write the release; + daily_tasks/email)
   index.html               static root page ("Execute Daily Tasks" UI)
@@ -119,7 +119,7 @@ pip install -r requirements.txt
 
 cp .env.example .env   # then fill in at least one LLM provider's API key
 
-uvicorn api.index:app --reload
+uvicorn api.app:app --reload
 ```
 
 Then open `http://localhost:8000` — the app also serves `index.html`
