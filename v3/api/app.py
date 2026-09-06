@@ -7,6 +7,18 @@ genuinely ambiguous between "/api" and "/api/index" and cost real debugging
 time. "app.py" has no special meaning, so it can only ever route to exactly
 /api/app -- see vercel.json's "rewrites" entry, which must point there.
 
+IMPORTANT, confirmed empirically (not just from docs): Vercel's rewrite
+preserves the original HTTP method and body but does NOT preserve the
+original request path -- every request under /api/* arrives here with
+request.url.path literally equal to "/api/app" (the rewrite's destination),
+regardless of whether the browser called /api/press-release or
+/api/cron/daily-tasks. Only the method still distinguishes them. That's why
+every route below is registered at BOTH its real/friendly path (so direct
+curl, `uvicorn`, and `vercel dev` testing all still work without going
+through a rewrite) AND "/api/app" (what production traffic actually looks
+like once Vercel's rewrite has run) -- do not remove the "/api/app"
+decorator thinking it's a leftover duplicate.
+
 Routes (see vercel.json for how /api/* is rewritten to this file):
     POST /api/press-release     build a press release on demand (used by the
                                  site's "Execute Daily Tasks" button)
@@ -76,6 +88,7 @@ class PressReleaseRequest(BaseModel):
 
 
 @app.post("/api/press-release")
+@app.post("/api/app")  # see module docstring: production traffic arrives at this path, not the one above
 def generate_press_release(payload: PressReleaseRequest) -> dict:
     logger.info("press-release requested day=%s", payload.day)
     try:
@@ -89,6 +102,7 @@ def generate_press_release(payload: PressReleaseRequest) -> dict:
 
 
 @app.get("/api/cron/daily-tasks")
+@app.get("/api/app")  # see module docstring: production traffic arrives at this path, not the one above
 def run_daily_tasks(authorization: str | None = Header(default=None)) -> dict:
     logger.info("daily-tasks cron invoked")
     cron_secret = os.getenv("CRON_SECRET")
