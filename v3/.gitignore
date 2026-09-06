@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Virtual environment
+.venv/
+
+# Environment secrets
+.env
+
+# Vercel
+.vercel
+
+# Downloaded/cached game word list
+data/
+
+# Local output from running the CLI directly
+output/
+
+# OS cruft
+.DS_Store

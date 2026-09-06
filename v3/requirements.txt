@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+requests
+wordfreq
+Pillow
+google-genai
+resend
+langchain
+langchain-core
+langchain-anthropic
+langchain-openai
+langchain-google-genai
+langchain-groq
+langchain-ollama
+python-dotenv

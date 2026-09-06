@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Worcadian Agent</title>
+  <link rel="icon" type="image/png" href="https://whatgamestudios.com/worcadian/worcadian-logo.png" />
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f2e9d8;
+      --ink: #2b2420;
+      --accent: #96682d;
+      --panel: #fffdf8;
+      --border: #d8c7a4;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #1c1712;
+        --ink: #ece3d4;
+        --accent: #d3a45e;
+        --panel: #262019;
+        --border: #4a3d2c;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Georgia, "Times New Roman", serif;
+      display: flex;
+      justify-content: center;
+      padding: 2.5rem 1.25rem;
+    }
+    main {
+      width: 100%;
+      max-width: 720px;
+    }
+    h1 {
+      text-align: center;
+      letter-spacing: 0.04em;
+      margin: 0 0 0.25rem;
+    }
+    .subtitle {
+      text-align: center;
+      color: var(--accent);
+      font-style: italic;
+      margin: 0 0 2rem;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1.5rem;
+    }
+    label {
+      display: block;
+      font-weight: bold;
+      margin-bottom: 0.4rem;
+    }
+    .controls {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      align-items: flex-end;
+      margin-bottom: 1.25rem;
+    }
+    .field { flex: 1 1 200px; }
+    input[type="number"] {
+      width: 100%;
+      padding: 0.55rem 0.65rem;
+      font-size: 1rem;
+      font-family: inherit;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: var(--bg);
+      color: var(--ink);
+    }
+    button {
+      padding: 0.6rem 1.1rem;
+      font-size: 1rem;
+      font-family: inherit;
+      font-weight: bold;
+      border: 1px solid var(--accent);
+      border-radius: 4px;
+      background: var(--accent);
+      color: var(--panel);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    button:disabled {
+      opacity: 0.6;
+      cursor: wait;
+    }
+    textarea {
+      width: 100%;
+      min-height: 320px;
+      padding: 0.85rem;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 0.95rem;
+      line-height: 1.5;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: var(--bg);
+      color: var(--ink);
+      resize: vertical;
+    }
+    .status {
+      min-height: 1.2rem;
+      margin: 0.5rem 0 0.75rem;
+      font-style: italic;
+      color: var(--accent);
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Worcadian Agent</h1>
+    <p class="subtitle">Daily press release generator</p>
+
+    <div class="panel">
+      <div class="controls">
+        <div class="field">
+          <label for="game-day">Game day</label>
+          <input id="game-day" type="number" min="1" placeholder="Current game day" />
+        </div>
+        <button id="run-button" type="button">Execute Daily Tasks</button>
+      </div>
+
+      <div id="status" class="status"></div>
+
+      <label for="output">Output</label>
+      <textarea id="output" readonly placeholder="The press release will appear here."></textarea>
+    </div>
+  </main>
+
+  <script>
+    const runButton = document.getElementById("run-button");
+    const dayInput = document.getElementById("game-day");
+    const output = document.getElementById("output");
+    const status = document.getElementById("status");
+
+    runButton.addEventListener("click", async () => {
+      const raw = dayInput.value.trim();
+      const day = raw === "" ? null : Number(raw);
+
+      runButton.disabled = true;
+      status.textContent = "Generating press release...";
+      output.value = "";
+
+      try {
+        const response = await fetch("/api/press-release", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ day }),
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.detail || `Request failed with status ${response.status}`);
+        }
+        output.value = data.text;
+        status.textContent = `Done (game day ${data.game_day ?? "current"}).`;
+      } catch (err) {
+        status.textContent = `Error: ${err.message}`;
+      } finally {
+        runButton.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
