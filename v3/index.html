@@ -127,6 +127,12 @@
       letter-spacing: 0.03em;
       font-size: 0.9rem;
     }
+    #word-card {
+      max-width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      margin-top: 0.4rem;
+    }
   </style>
 </head>
 <body>
@@ -150,6 +156,11 @@
 
       <label style="margin-top: 1.25rem;">Word Definitions</label>
       <div id="definitions" class="definitions"></div>
+
+      <div id="card-section" style="display: none;">
+        <label for="word-card">Word Card</label>
+        <img id="word-card" alt="Word card" />
+      </div>
     </div>
   </main>
 
@@ -159,6 +170,8 @@
     const output = document.getElementById("output");
     const status = document.getElementById("status");
     const definitionsContainer = document.getElementById("definitions");
+    const cardSection = document.getElementById("card-section");
+    const wordCard = document.getElementById("word-card");
 
     function renderDefinitions(definitions) {
       definitionsContainer.innerHTML = "";
@@ -195,6 +208,8 @@
       status.textContent = "Generating press release...";
       output.value = "";
       definitionsContainer.innerHTML = "";
+      cardSection.style.display = "none";
+      wordCard.src = "";
 
       try {
         const response = await fetch("/api/press-release", {
@@ -208,6 +223,10 @@
         }
         output.value = data.text;
         renderDefinitions(data.definitions);
+        if (data.card_image) {
+          wordCard.src = data.card_image;
+          cardSection.style.display = "block";
+        }
         status.textContent = `Done (game day ${data.game_day ?? "current"}).`;
       } catch (err) {
         status.textContent = `Error: ${err.message}`;

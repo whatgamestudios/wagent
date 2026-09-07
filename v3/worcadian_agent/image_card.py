@@ -13,6 +13,7 @@ Standalone usage:
 from __future__ import annotations
 
 import argparse
+import io
 import sys
 from datetime import date
 from pathlib import Path
@@ -156,17 +157,17 @@ def _draw_centered(
         draw.text(((canvas_width - width) / 2, y), text, font=font, fill=fill)
 
 
-def generate_word_card(
+def _render_card_image(
     word: str,
     meaning: str,
-    output_path: str | Path,
+    part_of_speech: str | None = None,
     width: int = 1080,
     height: int = 1080,
     font_dir: str | Path | None = None,
     kicker: str = "WORCADIAN · WORD OF THE DAY",
     footer: str | None = None,
-) -> Path:
-    """Render `word` and `meaning` onto a parchment card and save it as a PNG."""
+) -> Image.Image:
+    """Render `word` (and optional `part_of_speech`) and `meaning` onto a parchment card."""
     img = Image.new("RGB", (width, height), BACKGROUND)
     draw = ImageDraw.Draw(img)
 
@@ -197,7 +198,16 @@ def generate_word_card(
     )
     word_height = draw.textbbox((0, 0), word_text, font=word_font)[3]
     _draw_centered(draw, y, word_text, word_font, INK, width)
-    y += word_height + round(height * 0.05)
+    y += word_height + round(height * 0.025)
+
+    if part_of_speech:
+        pos_text = part_of_speech.strip().lower()
+        pos_font = _load_font("italic", round(width * 0.028), font_dir)
+        pos_height = draw.textbbox((0, 0), pos_text, font=pos_font)[3]
+        _draw_centered(draw, y, pos_text, pos_font, ACCENT, width)
+        y += pos_height + round(height * 0.03)
+    else:
+        y += round(height * 0.025)
 
     draw.line([(width / 2 - 40, y), (width / 2 + 40, y)], fill=ACCENT, width=2)
     y += round(height * 0.055)
@@ -217,16 +227,58 @@ def generate_word_card(
 
     _draw_centered(draw, footer_y, footer_text, footer_font, ACCENT, width, tracking=round(width * 0.003))
 
+    return img
+
+
+def generate_word_card(
+    word: str,
+    meaning: str,
+    output_path: str | Path,
+    part_of_speech: str | None = None,
+    width: int = 1080,
+    height: int = 1080,
+    font_dir: str | Path | None = None,
+    kicker: str = "WORCADIAN · WORD OF THE DAY",
+    footer: str | None = None,
+) -> Path:
+    """Render `word` and `meaning` onto a parchment card and save it as a PNG file."""
+    img = _render_card_image(
+        word, meaning, part_of_speech=part_of_speech, width=width, height=height,
+        font_dir=font_dir, kicker=kicker, footer=footer,
+    )
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     img.save(output_path, "PNG")
     return output_path
 
 
+def generate_word_card_bytes(
+    word: str,
+    meaning: str,
+    part_of_speech: str | None = None,
+    width: int = 1080,
+    height: int = 1080,
+    font_dir: str | Path | None = None,
+    kicker: str = "WORCADIAN · WORD OF THE DAY",
+    footer: str | None = None,
+) -> bytes:
+    """Render `word` and `meaning` onto a parchment card and return it as PNG bytes,
+    without touching disk -- for serverless callers that embed the image directly
+    in an API response (e.g. as a data: URI) rather than persisting a file."""
+    img = _render_card_image(
+        word, meaning, part_of_speech=part_of_speech, width=width, height=height,
+        font_dir=font_dir, kicker=kicker, footer=footer,
+    )
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    return buf.getvalue()
+
+
 def _main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("word", help="The word to feature")
     parser.add_argument("meaning", help="A short definition/meaning of the word")
+    parser.add_argument("--part-of-speech", default=None, help="e.g. noun, verb -- shown under the word")
     parser.add_argument("--output-dir", default="output", help="Where to write the PNG (default: output)")
     parser.add_argument("--output", default=None, help="Explicit output file path (overrides --output-dir)")
     parser.add_argument("--width", type=int, default=1080)
@@ -249,6 +301,7 @@ def _main() -> None:
         args.word,
         args.meaning,
         out_path,
+        part_of_speech=args.part_of_speech,
         width=args.width,
         height=args.height,
         font_dir=args.font_dir,

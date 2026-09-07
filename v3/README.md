@@ -186,5 +186,9 @@ number field (leave blank to use the current game day) and an **Execute Daily
 Tasks** button that calls `POST /api/press-release` and displays the
 generated press release in the output text box, followed by one read-only
 text box per looked-up word showing its part of speech, definition, and
-short definition. The favicon is the Worcadian logo, loaded directly from
+short definition. Below that, a word card image is shown for the *last*
+looked-up word — rendered on demand by `worcadian_agent/image_card.py`
+(word, part of speech, and definition in, PNG bytes out) and returned inline
+as a base64 `data:` URI in the API response, with no file persisted anywhere.
+The favicon is the Worcadian logo, loaded directly from
 `https://whatgamestudios.com/worcadian/worcadian-logo.png`.

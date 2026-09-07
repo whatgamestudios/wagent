@@ -34,6 +34,7 @@ Python function (a routing/rewrite problem, not an app-code problem).
 
 from __future__ import annotations
 
+import base64
 import logging
 import os
 import sys
@@ -58,10 +59,29 @@ load_dotenv()
 from worcadian_agent.agent import build_press_release, gather_facts  # noqa: E402
 from worcadian_agent.daily_tasks import daily_tasks  # noqa: E402
 from worcadian_agent.dictionary_client import lookup_words  # noqa: E402
+from worcadian_agent.image_card import generate_word_card_bytes  # noqa: E402
 
 app = FastAPI()
 
 OUTPUT_DIR = "/tmp/output"
+
+
+def _build_word_card_data_url(definitions: dict[str, dict]) -> str | None:
+    """Render a word card for the last word in `definitions` (in lookup order) and
+    return it as a data: URI ready for an <img src>, or None if there's nothing to render."""
+    if not definitions:
+        return None
+    word = next(reversed(definitions))
+    entry = definitions[word]
+    meaning = entry.get("definition") or entry.get("short_definition")
+    if not meaning:
+        return None
+    try:
+        png_bytes = generate_word_card_bytes(word, meaning, part_of_speech=entry.get("part_of_speech"))
+    except Exception:
+        logger.exception("word card generation failed word=%s", word)
+        return None
+    return f"data:image/png;base64,{base64.b64encode(png_bytes).decode('ascii')}"
 
 
 @app.middleware("http")
@@ -96,6 +116,7 @@ def generate_press_release(payload: PressReleaseRequest) -> dict:
         facts_bundle = gather_facts(payload.day)
         words_to_look_up = [facts_bundle["seed_word"]] + [w["word"] for w in facts_bundle["notable_words"]]
         definitions = lookup_words(words_to_look_up)
+        card_image = _build_word_card_data_url(definitions)
         path = build_press_release(facts_bundle, output_dir=OUTPUT_DIR)
     except Exception as exc:
         logger.exception("press-release generation failed day=%s", payload.day)
@@ -105,6 +126,7 @@ def generate_press_release(payload: PressReleaseRequest) -> dict:
         "game_day": facts_bundle["game_day"],
         "text": Path(path).read_text(),
         "definitions": definitions,
+        "card_image": card_image,
     }
 
 
