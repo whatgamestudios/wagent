@@ -28,6 +28,7 @@ OAuth login** below.
 v3/
   api/
     app.py                 press-release + cron endpoints (Vercel function)
+    landing.py             serves index.html at /api/landing, no login needed (Vercel function)
     home.py                serves dashboard.html at /api/home, gated by session (Vercel function)
     login.py               starts the Auth0 login flow at /api/login (Vercel function)
     callback.py            handles Auth0's redirect at /api/callback (Vercel function)
@@ -35,7 +36,7 @@ v3/
   worcadian_agent/         the press-release pipeline (fetch data, score words,
                             call the LLM, write the release; + daily_tasks/email;
                             + oauth.py/session.py/app_setup.py for login)
-  index.html               public landing page ("/") -- real static file, no login needed
+  index.html               public landing page content, served via api/landing.py
   dashboard.html           the actual tool, served by api/home.py once logged in
   vercel.json              routing, cron schedule, function config
   requirements.txt
@@ -44,12 +45,15 @@ v3/
 
 Each `api/*.py` file is deployed as its own separate Vercel serverless
 function, at its plain zero-config address (`api/home.py` → `/api/home`,
-etc.) — see `api/home.py`'s module docstring for why none of the auth routes
-use a prettier custom-rewritten URL like `/auth/login`: those rewrites
-repeatedly misbehaved in production in ways that were never fully pinned
-down, so every auth route now uses its native `/api/<filename>` address
-directly instead. `/` itself is a genuinely static `index.html` with no
-rewrite at all — the one part of this that's never had a routing problem.
+etc.), reached via a single exact (non-wildcard) rewrite each. See
+`api/home.py`'s module docstring for why none of these use a prettier
+custom-rewritten URL like `/auth/login`, and `api/landing.py`'s docstring for
+why even `/` goes through a dedicated function+rewrite rather than being
+served as a plain static file: both custom rewrites *and* Vercel's implicit
+static-file serving for the project root repeatedly misbehaved in ways that
+were never fully pinned down. Every URL in this app now maps to exactly one
+function via exactly one non-wildcard rewrite rule (or, for `/api/<name>`
+addresses, no rewrite at all) — the pattern that's actually held up.
 
 ## Configuring LLM providers
 
@@ -219,13 +223,12 @@ cp .env.example .env   # then fill in at least one LLM provider's API key,
 vercel dev
 ```
 
-`vercel dev` serves the whole site (the static `/` landing page plus all
-five functions) together on one port (`http://localhost:3000` by default),
+`vercel dev` serves the whole site (all six functions, including `/` via
+`api/landing.py`) together on one port (`http://localhost:3000` by default),
 matching production. Running a single function directly with
 `uvicorn api.home:app --reload`, etc. also works for poking at one endpoint
-in isolation, at its native path (e.g. `/api/home`, `/api/login`) — but
-won't serve the static landing page itself, since that's not part of any
-function.
+in isolation, at its native path (e.g. `/api/home`, `/api/login`,
+`/api/landing`).
 
 ## Deploying to Vercel
 
@@ -252,8 +255,8 @@ Project Settings → Environment Variables.
 
 ## API endpoints
 
-- `GET /` — the public landing page (static `index.html`, no login needed):
-  "Worcadian Agent" and a "Log in" button pointing at `/api/login`.
+- `GET /` — the public landing page (rewritten to `api/landing.py`, no login
+  needed): "Worcadian Agent" and a "Log in" button pointing at `/api/login`.
 - `GET /api/login` — redirects to Auth0's login page.
 - `GET /api/callback` — Auth0 redirects back here with the auth code;
   exchanges it for the account's email, checks `ALLOWED_EMAILS`, and sets the
