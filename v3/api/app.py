@@ -55,8 +55,9 @@ from pydantic import BaseModel
 
 load_dotenv()
 
-from worcadian_agent.agent import build_press_release  # noqa: E402
+from worcadian_agent.agent import build_press_release, gather_facts  # noqa: E402
 from worcadian_agent.daily_tasks import daily_tasks  # noqa: E402
+from worcadian_agent.dictionary_client import lookup_words  # noqa: E402
 
 app = FastAPI()
 
@@ -92,13 +93,19 @@ class PressReleaseRequest(BaseModel):
 def generate_press_release(payload: PressReleaseRequest) -> dict:
     logger.info("press-release requested day=%s", payload.day)
     try:
-        path = build_press_release(day=payload.day, output_dir=OUTPUT_DIR)
+        facts_bundle = gather_facts(payload.day)
+        words_to_look_up = [facts_bundle["seed_word"]] + [w["word"] for w in facts_bundle["notable_words"]]
+        definitions = lookup_words(words_to_look_up)
+        path = build_press_release(facts_bundle, output_dir=OUTPUT_DIR)
     except Exception as exc:
         logger.exception("press-release generation failed day=%s", payload.day)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-    resolved_game_day = Path(path).stem.split("-", 1)[0]
-    logger.info("press-release generated game_day=%s path=%s", resolved_game_day, path)
-    return {"game_day": resolved_game_day, "text": Path(path).read_text()}
+    logger.info("press-release generated game_day=%s path=%s", facts_bundle["game_day"], path)
+    return {
+        "game_day": facts_bundle["game_day"],
+        "text": Path(path).read_text(),
+        "definitions": definitions,
+    }
 
 
 @app.get("/api/cron/daily-tasks")

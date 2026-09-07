@@ -87,6 +87,28 @@ doesn't already have a prefix).
   sender. Set this to an address on a domain you've verified with Resend for
   production use.
 
+## Configuring dictionary lookups
+
+Both `daily_tasks` and the on-demand "Execute Daily Tasks" button look up the
+seed word and every notable (WOW/OBSCURE-tier) word of the day in the
+[Merriam-Webster Collegiate Dictionary API](https://dictionaryapi.com/products/api-collegiate-dictionary),
+via `worcadian_agent/dictionary_client.py`. Get a free key at
+https://dictionaryapi.com/register/index and set:
+
+- `MERRIAM_WEBSTER_API_KEY` — required for lookups to run at all; if unset,
+  lookups are silently skipped (the press release itself still generates).
+
+For each word, the client extracts the first entry Merriam-Webster returns
+and pulls three fields from it: `part_of_speech` (the entry's functional
+label, e.g. "noun"), `definition` (the first full definition, with
+Merriam-Webster's markup stripped), and `short_definition` (Merriam-Webster's
+own condensed one-liner). A word Merriam-Webster doesn't recognize is simply
+omitted rather than erroring out.
+
+This information is shown as a separate text box per word on the website,
+and as a separate section per word in the daily email (after the press
+release text).
+
 ## Configuring the time of day `daily_tasks` runs
 
 `daily_tasks` is triggered by the Vercel Cron Job defined in `vercel.json`:
@@ -135,6 +157,7 @@ npm i -g vercel   # if you don't already have the CLI
 cd v3
 vercel link
 vercel env add ANTHROPIC_API_KEY        # repeat for each env var you're using
+vercel env add MERRIAM_WEBSTER_API_KEY
 vercel env add RESEND_API_KEY
 vercel env add EMAIL_RECIPIENTS
 vercel env add CRON_SECRET
@@ -147,17 +170,21 @@ Project Settings → Environment Variables.
 ## API endpoints
 
 - `POST /api/press-release` — body `{"day": 120}` (or `{"day": null}`/omitted
-  for the current game day). Returns `{"game_day": ..., "text": ...}`. Used by
-  the root page's "Execute Daily Tasks" button; does not send email.
+  for the current game day). Returns `{"game_day": ..., "text": ..., "definitions": {...}}`,
+  where `definitions` maps each looked-up word to
+  `{part_of_speech, definition, short_definition}`. Used by the root page's
+  "Execute Daily Tasks" button; does not send email.
 - `GET /api/cron/daily-tasks` — builds the press release for the current game
-  day and emails it to `EMAIL_RECIPIENTS`. This is what the Vercel Cron Job
-  calls; requires the `CRON_SECRET` bearer token if that env var is set.
+  day, looks up its words, and emails everything to `EMAIL_RECIPIENTS`. This
+  is what the Vercel Cron Job calls; requires the `CRON_SECRET` bearer token
+  if that env var is set.
 
 ## The website
 
 The root page (`index.html`) is titled **Worcadian Agent**. It has a game-day
 number field (leave blank to use the current game day) and an **Execute Daily
 Tasks** button that calls `POST /api/press-release` and displays the
-generated press release in the output text box below. The favicon is the
-Worcadian logo, loaded directly from
+generated press release in the output text box, followed by one read-only
+text box per looked-up word showing its part of speech, definition, and
+short definition. The favicon is the Worcadian logo, loaded directly from
 `https://whatgamestudios.com/worcadian/worcadian-logo.png`.

@@ -4,6 +4,11 @@ Pipeline: fetch today's game data -> score word obscurity -> detect shared
 discoveries across players -> one LangChain prompt/LLM/parser call writes a
 ~500-word newspaper-style summary -> write it to <game_day>-<date>.txt.
 
+Split into two steps so callers can do work (e.g. dictionary lookups) with
+the assembled facts before/alongside generating the press release itself:
+    gather_facts(day)              -> a facts bundle (game data, scores, notable words)
+    build_press_release(bundle)    -> writes the press release from that bundle
+
 LLM calls go through LangChain (see llm_factory.py); when no --model is given,
 up to five optional models are chained from the MODEL_NAME_1..5 /
 MODEL_API_KEY_1..5 env vars, so a failure on one model retries the next.
@@ -87,13 +92,16 @@ def find_shared_words(players: list[dict], seed_word: str) -> dict[str, list[str
     return {word: ps for word, ps in word_to_players.items() if len(ps) > 1}
 
 
-def build_press_release(
-    day: int | None = None,
-    provider: str | None = None,
-    model: str | None = None,
-    output_dir: str | Path = "output",
-) -> Path:
-    logger.info("build_press_release start day=%s provider=%s model=%s", day, provider, model)
+def gather_facts(day: int | None = None) -> dict:
+    """Fetch today's game data and assemble the `facts` dict + `shared_note` used
+    by build_press_release's prompt.
+
+    Returns {"game_day", "seed_word", "facts", "shared_note", "notable_words"}.
+    "notable_words" is exposed separately (it's also embedded in "facts") since
+    callers (daily_tasks, the on-demand API handler) need the plain list of
+    words to run dictionary lookups against.
+    """
+    logger.info("gather_facts start day=%s", day)
 
     data = fetch_today_data(day)
     players = data["players"]
@@ -147,6 +155,27 @@ def build_press_release(
             "do not claim any convergence happened."
         )
 
+    return {
+        "game_day": data["game_day"],
+        "seed_word": seed,
+        "facts": facts,
+        "shared_note": shared_note,
+        "notable_words": notable_words,
+    }
+
+
+def build_press_release(
+    facts_bundle: dict,
+    provider: str | None = None,
+    model: str | None = None,
+    output_dir: str | Path = "output",
+) -> Path:
+    """Write a press release from a facts bundle produced by gather_facts()."""
+    logger.info("build_press_release start game_day=%s provider=%s model=%s", facts_bundle["game_day"], provider, model)
+
+    facts = facts_bundle["facts"]
+    shared_note = facts_bundle["shared_note"]
+
     lore = LORE_PATH.read_text()
     prompt = ChatPromptTemplate.from_messages(
         [
@@ -170,7 +199,7 @@ def build_press_release(
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    filename = f"{data['game_day']}-{date.today().isoformat()}.txt"
+    filename = f"{facts_bundle['game_day']}-{date.today().isoformat()}.txt"
     out_path = output_dir / filename
     out_path.write_text(summary + "\n")
     logger.info("build_press_release done path=%s", out_path)
@@ -199,8 +228,9 @@ def _main() -> None:
     parser.add_argument("--output-dir", default="output")
     args = parser.parse_args()
 
+    facts_bundle = gather_facts(args.day)
     path = build_press_release(
-        day=args.day,
+        facts_bundle,
         provider=args.provider,
         model=args.model,
         output_dir=args.output_dir,
