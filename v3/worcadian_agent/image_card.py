@@ -24,20 +24,33 @@ BACKGROUND = (242, 233, 216)  # parchment
 INK = (43, 36, 32)  # near-black brown
 ACCENT = (150, 104, 45)  # aged gold, used for rules/kicker/footer
 
-# Georgia ships with macOS; DejaVu Serif is the common Linux fallback. Pass
-# --font-dir (a folder with regular.ttf/bold.ttf/italic.ttf) to override.
+# fonts/ ships DejaVu Serif regular/bold/italic (bundled in the repo -- see
+# fonts/LICENSE) as the guaranteed final fallback: a serverless deployment
+# (e.g. Vercel's Python runtime) has NO system fonts at all, so relying only
+# on macOS's Georgia or a Linux distro's DejaVu package silently degraded to
+# PIL's tiny fixed-size bitmap font in production, with every piece of text
+# on the card collapsing to the same tiny size regardless of the sizing logic
+# below -- this bundled copy means that can't happen regardless of host OS.
+BUNDLED_FONT_DIR = Path(__file__).resolve().parent / "fonts"
+
+# Checked in order: an explicit --font-dir, then Georgia (macOS) or a Linux
+# distro's DejaVu Serif package if either happens to be present, then the
+# bundled copy above, which always exists.
 _FONT_CANDIDATES = {
     "regular": [
         "/System/Library/Fonts/Supplemental/Georgia.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
+        str(BUNDLED_FONT_DIR / "regular.ttf"),
     ],
     "bold": [
         "/System/Library/Fonts/Supplemental/Georgia Bold.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf",
+        str(BUNDLED_FONT_DIR / "bold.ttf"),
     ],
     "italic": [
         "/System/Library/Fonts/Supplemental/Georgia Italic.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Italic.ttf",
+        str(BUNDLED_FONT_DIR / "italic.ttf"),
     ],
 }
 
@@ -199,14 +212,14 @@ def _render_card_image(
     y += round(height * 0.055)
 
     word_text = word.strip().upper()
+#    word_font = _fit_font(
+#        draw, word_text, "bold", content_width, font_dir,
+#        start_size=round(width * 0.5), min_size=round(width * 0.2),
+#    )
     word_font = _fit_font(
         draw, word_text, "bold", content_width, font_dir,
-        start_size=round(width * 0.5), min_size=round(width * 0.2),
+        start_size=round(width * 0.16), min_size=round(width * 0.05),
     )
-    # word_font = _fit_font(
-    #     draw, word_text, "bold", content_width, font_dir,
-    #     start_size=round(width * 0.16), min_size=round(width * 0.05),
-    # )
     word_height = draw.textbbox((0, 0), word_text, font=word_font)[3]
     _draw_centered(draw, y, word_text, word_font, INK, width)
     y += word_height + round(height * 0.025)
