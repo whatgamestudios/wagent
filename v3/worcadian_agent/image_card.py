@@ -201,8 +201,12 @@ def _render_card_image(
     word_text = word.strip().upper()
     word_font = _fit_font(
         draw, word_text, "bold", content_width, font_dir,
-        start_size=round(width * 0.16), min_size=round(width * 0.05),
+        start_size=round(width * 0.5), min_size=round(width * 0.2),
     )
+    # word_font = _fit_font(
+    #     draw, word_text, "bold", content_width, font_dir,
+    #     start_size=round(width * 0.16), min_size=round(width * 0.05),
+    # )
     word_height = draw.textbbox((0, 0), word_text, font=word_font)[3]
     _draw_centered(draw, y, word_text, word_font, INK, width)
     y += word_height + round(height * 0.025)
