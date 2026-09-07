@@ -1,11 +1,17 @@
 {
   "rewrites": [
+    { "source": "/", "destination": "/api/home" },
+    { "source": "/auth/login", "destination": "/api/login" },
+    { "source": "/auth/callback", "destination": "/api/callback" },
+    { "source": "/auth/logout", "destination": "/api/logout" },
     { "source": "/api/:path*", "destination": "/api/app" }
   ],
   "functions": {
-    "api/app.py": {
-      "maxDuration": 60
-    }
+    "api/app.py": { "maxDuration": 60 },
+    "api/home.py": { "maxDuration": 15 },
+    "api/login.py": { "maxDuration": 10 },
+    "api/callback.py": { "maxDuration": 15 },
+    "api/logout.py": { "maxDuration": 10 }
   },
   "crons": [
     { "path": "/api/cron/daily-tasks", "schedule": "0 0 * * *" }

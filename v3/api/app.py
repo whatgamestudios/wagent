@@ -21,10 +21,17 @@ decorator thinking it's a leftover duplicate.
 
 Routes (see vercel.json for how /api/* is rewritten to this file):
     POST /api/press-release     build a press release on demand (used by the
-                                 site's "Execute Daily Tasks" button)
-    GET  /api/cron/daily-tasks  the scheduled daily_tasks job Vercel Cron hits
+                                 site's "Execute Daily Tasks" button); requires
+                                 an OAuth session (see worcadian_agent/oauth.py)
+    GET  /api/cron/daily-tasks  the scheduled daily_tasks job Vercel Cron hits;
+                                 protected by CRON_SECRET, not OAuth, since it's
+                                 machine-triggered
 
-Logging: configured below with logging.basicConfig() so every logger.info()/
+The OAuth-gated home page itself (GET /) lives in api/home.py, not here --
+see that file's docstring for why each concern gets its own dedicated
+function file rather than being folded into this one.
+
+Logging: configured (via app_setup.configure_app) so every logger.info()/
 logger.exception() call in this module and in worcadian_agent.* reaches
 stderr, which Vercel captures as Function Logs. A request-logging middleware
 logs every request that actually reaches this app (method, path, status,
@@ -38,7 +45,6 @@ import base64
 import logging
 import os
 import sys
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -51,17 +57,19 @@ logger = logging.getLogger("worcadian_agent.api")
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 load_dotenv()
 
 from worcadian_agent.agent import build_press_release, gather_facts  # noqa: E402
+from worcadian_agent.app_setup import configure_app  # noqa: E402
 from worcadian_agent.daily_tasks import daily_tasks  # noqa: E402
 from worcadian_agent.dictionary_client import lookup_words  # noqa: E402
 from worcadian_agent.image_card import generate_word_card_bytes  # noqa: E402
+from worcadian_agent.oauth import is_email_allowed  # noqa: E402
 
 app = FastAPI()
+configure_app(app, logger)
 
 OUTPUT_DIR = "/tmp/output"
 
@@ -84,26 +92,6 @@ def _build_word_card_data_url(definitions: dict[str, dict]) -> str | None:
     return f"data:image/png;base64,{base64.b64encode(png_bytes).decode('ascii')}"
 
 
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    start = time.monotonic()
-    logger.info("request start method=%s path=%s", request.method, request.url.path)
-    try:
-        response = await call_next(request)
-    except Exception:
-        logger.exception("request raised an unhandled exception method=%s path=%s", request.method, request.url.path)
-        raise
-    duration_ms = (time.monotonic() - start) * 1000
-    logger.info(
-        "request end method=%s path=%s status=%s duration_ms=%.1f",
-        request.method,
-        request.url.path,
-        response.status_code,
-        duration_ms,
-    )
-    return response
-
-
 # TEMPORARY: the "Execute Daily Tasks" button skips the LLM press-release
 # generation step (gather_facts/dictionary lookups/word card still run) while
 # that's being worked on separately. Set back to False to re-enable it.
@@ -116,8 +104,13 @@ class PressReleaseRequest(BaseModel):
 
 @app.post("/api/press-release")
 @app.post("/api/app")  # see module docstring: production traffic arrives at this path, not the one above
-def generate_press_release(payload: PressReleaseRequest) -> dict:
-    logger.info("press-release requested day=%s", payload.day)
+def generate_press_release(payload: PressReleaseRequest, request: Request) -> dict:
+    email = request.session.get("user_email")
+    if not email or not is_email_allowed(email):
+        logger.warning("press-release rejected: no valid OAuth session")
+        raise HTTPException(status_code=401, detail="Not authenticated. Please log in.")
+
+    logger.info("press-release requested day=%s by=%s", payload.day, email)
     try:
         facts_bundle = gather_facts(payload.day)
         words_to_look_up = [facts_bundle["seed_word"]] + [w["word"] for w in facts_bundle["notable_words"]]
@@ -157,10 +150,3 @@ def run_daily_tasks(authorization: str | None = Header(default=None)) -> dict:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     logger.info("daily-tasks completed result=%s", result)
     return {"status": "ok", **result}
-
-
-# Serves index.html for local dev (`uvicorn api.app:app`) so the page and
-# API share an origin. In production Vercel serves index.html as a static
-# file directly and never reaches this app for "/", since vercel.json only
-# rewrites /api/* here — this mount is inert there.
-app.mount("/", StaticFiles(directory=str(Path(__file__).resolve().parent.parent), html=True), name="static")
