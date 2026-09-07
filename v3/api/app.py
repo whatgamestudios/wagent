@@ -104,6 +104,12 @@ async def log_requests(request: Request, call_next):
     return response
 
 
+# TEMPORARY: the "Execute Daily Tasks" button skips the LLM press-release
+# generation step (gather_facts/dictionary lookups/word card still run) while
+# that's being worked on separately. Set back to False to re-enable it.
+SKIP_PRESS_RELEASE_ON_BUTTON = True
+
+
 class PressReleaseRequest(BaseModel):
     day: int | None = None
 
@@ -117,14 +123,19 @@ def generate_press_release(payload: PressReleaseRequest) -> dict:
         words_to_look_up = [facts_bundle["seed_word"]] + [w["word"] for w in facts_bundle["notable_words"]]
         definitions = lookup_words(words_to_look_up)
         card_image = _build_word_card_data_url(definitions)
-        path = build_press_release(facts_bundle, output_dir=OUTPUT_DIR)
+        if SKIP_PRESS_RELEASE_ON_BUTTON:
+            logger.info("press-release generation temporarily disabled; skipping build_press_release")
+            text = "(press release generation is temporarily disabled)"
+        else:
+            path = build_press_release(facts_bundle, output_dir=OUTPUT_DIR)
+            text = Path(path).read_text()
     except Exception as exc:
         logger.exception("press-release generation failed day=%s", payload.day)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-    logger.info("press-release generated game_day=%s path=%s", facts_bundle["game_day"], path)
+    logger.info("press-release step done game_day=%s", facts_bundle["game_day"])
     return {
         "game_day": facts_bundle["game_day"],
-        "text": Path(path).read_text(),
+        "text": text,
         "definitions": definitions,
         "card_image": card_image,
     }
