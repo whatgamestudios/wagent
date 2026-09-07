@@ -28,7 +28,7 @@ OAuth login** below.
 v3/
   api/
     app.py                 press-release + cron endpoints (Vercel function)
-    landing.py             serves index.html at /api/landing, no login needed (Vercel function)
+    welcome.py             serves index.html at /api/welcome, no login needed (Vercel function)
     home.py                serves dashboard.html at /api/home, gated by session (Vercel function)
     login.py               starts the Auth0 login flow at /api/login (Vercel function)
     callback.py            handles Auth0's redirect at /api/callback (Vercel function)
@@ -36,7 +36,7 @@ v3/
   worcadian_agent/         the press-release pipeline (fetch data, score words,
                             call the LLM, write the release; + daily_tasks/email;
                             + oauth.py/session.py/app_setup.py for login)
-  index.html               public landing page content, served via api/landing.py
+  index.html               public landing page content, served via api/welcome.py
   dashboard.html           the actual tool, served by api/home.py once logged in
   vercel.json              routing, cron schedule, function config
   requirements.txt
@@ -47,7 +47,7 @@ Each `api/*.py` file is deployed as its own separate Vercel serverless
 function, at its plain zero-config address (`api/home.py` → `/api/home`,
 etc.), reached via a single exact (non-wildcard) rewrite each. See
 `api/home.py`'s module docstring for why none of these use a prettier
-custom-rewritten URL like `/auth/login`, and `api/landing.py`'s docstring for
+custom-rewritten URL like `/auth/login`, and `api/welcome.py`'s docstring for
 why even `/` goes through a dedicated function+rewrite rather than being
 served as a plain static file: both custom rewrites *and* Vercel's implicit
 static-file serving for the project root repeatedly misbehaved in ways that
@@ -224,11 +224,11 @@ vercel dev
 ```
 
 `vercel dev` serves the whole site (all six functions, including `/` via
-`api/landing.py`) together on one port (`http://localhost:3000` by default),
+`api/welcome.py`) together on one port (`http://localhost:3000` by default),
 matching production. Running a single function directly with
 `uvicorn api.home:app --reload`, etc. also works for poking at one endpoint
 in isolation, at its native path (e.g. `/api/home`, `/api/login`,
-`/api/landing`).
+`/api/welcome`).
 
 ## Deploying to Vercel
 
@@ -255,7 +255,7 @@ Project Settings → Environment Variables.
 
 ## API endpoints
 
-- `GET /` — the public landing page (rewritten to `api/landing.py`, no login
+- `GET /` — the public landing page (rewritten to `api/welcome.py`, no login
   needed): "Worcadian Agent" and a "Log in" button pointing at `/api/login`.
 - `GET /api/login` — redirects to Auth0's login page.
 - `GET /api/callback` — Auth0 redirects back here with the auth code;
