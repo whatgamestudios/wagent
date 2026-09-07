@@ -27,33 +27,32 @@ OAuth login** below.
 ```
 v3/
   api/
-    app.py                 press-release + cron endpoints (Vercel function)
-    welcome.py             serves index.html at /api/welcome, no login needed (Vercel function)
-    home.py                serves dashboard.html at /api/home, gated by session (Vercel function)
-    login.py               starts the Auth0 login flow at /api/login (Vercel function)
-    callback.py            handles Auth0's redirect at /api/callback (Vercel function)
-    logout.py              clears the session at /api/logout (Vercel function)
+    app.py                 the entire FastAPI app -- every route, one Vercel function
   worcadian_agent/         the press-release pipeline (fetch data, score words,
                             call the LLM, write the release; + daily_tasks/email;
                             + oauth.py/session.py/app_setup.py for login)
-  index.html               public landing page content, served via api/welcome.py
-  dashboard.html           the actual tool, served by api/home.py once logged in
-  vercel.json              routing, cron schedule, function config
+  index.html               public landing page, served at GET /
+  dashboard.html           the actual tool, served at GET /dashboard once logged in
+  vercel.json              function config, cron schedule
   requirements.txt
   .env.example
 ```
 
-Each `api/*.py` file is deployed as its own separate Vercel serverless
-function, at its plain zero-config address (`api/home.py` → `/api/home`,
-etc.), reached via a single exact (non-wildcard) rewrite each. See
-`api/home.py`'s module docstring for why none of these use a prettier
-custom-rewritten URL like `/auth/login`, and `api/welcome.py`'s docstring for
-why even `/` goes through a dedicated function+rewrite rather than being
-served as a plain static file: both custom rewrites *and* Vercel's implicit
-static-file serving for the project root repeatedly misbehaved in ways that
-were never fully pinned down. Every URL in this app now maps to exactly one
-function via exactly one non-wildcard rewrite rule (or, for `/api/<name>`
-addresses, no rewrite at all) — the pattern that's actually held up.
+Everything lives in **one** FastAPI app in `api/app.py`. Earlier versions of
+this project tried splitting concerns (login/callback/logout/home/landing)
+into separate `api/*.py` files, on the assumption that each would become its
+own Vercel serverless function. That assumption was wrong for this project:
+Vercel's dashboard confirmed the deployment builds exactly **one** function
+regardless of how many files exist, because it had detected "FastAPI" as the
+project's framework and bundles the whole thing as a single consolidated
+app — every other file was silently never actually deployed as anything,
+and all traffic was always landing on whichever one file Vercel picked to
+build (this one). See `api/app.py`'s module docstring for the full story.
+The fix was the opposite of splitting things up: put every route in this one
+file, using plain standard FastAPI paths (`/`, `/auth/login`,
+`/auth/callback`, `/auth/logout`, `/dashboard`, `/api/press-release`,
+`/api/cron/daily-tasks`) and let FastAPI's own router dispatch on the real
+request path — no custom `vercel.json` rewrites needed at all.
 
 ## Configuring LLM providers
 
@@ -137,7 +136,7 @@ release text).
 ## Configuring OAuth login
 
 `/` is a public landing page (just "Worcadian Agent" and a "Log in" button —
-no session required to view it). The actual dashboard (`GET /api/home`) and
+no session required to view it). The actual dashboard (`GET /dashboard`) and
 the on-demand "Execute Daily Tasks" button (`POST /api/press-release`) both
 require a logged-in, allowlisted account via [Auth0](https://auth0.com) —
 see `worcadian_agent/oauth.py`. The Vercel Cron Job
@@ -148,12 +147,10 @@ through a browser login flow.
 1. In the [Auth0 dashboard](https://manage.auth0.com/), go to **Applications
    → Create Application**, choose **Regular Web Applications**.
 2. In that application's **Settings** tab, add to **Allowed Callback URLs**:
-   `<PUBLIC_BASE_URL>/api/callback`, e.g.
-   `https://worcadian-agent.vercel.app/api/callback` (note: `/api/callback`,
-   *not* `/auth/callback` — see the project layout note above on why); and
-   add `<PUBLIC_BASE_URL>` (no path) to **Allowed Logout URLs**. Both must
-   match `PUBLIC_BASE_URL` below exactly (scheme included, no trailing
-   slash).
+   `<PUBLIC_BASE_URL>/auth/callback`, e.g.
+   `https://worcadian-agent.vercel.app/auth/callback`; and add
+   `<PUBLIC_BASE_URL>` (no path) to **Allowed Logout URLs**. Both must match
+   `PUBLIC_BASE_URL` below exactly (scheme included, no trailing slash).
 3. Set these env vars:
    - `AUTH0_DOMAIN` — your tenant domain shown on that Settings page, e.g.
      `your-tenant.us.auth0.com` (no scheme, no trailing slash).
@@ -169,14 +166,12 @@ through a browser login flow.
      ```
 
 The session is a signed cookie (via Starlette's `SessionMiddleware` /
-`itsdangerous`), not server-side storage, so it works fine across the
-separate `api/home.py`/`api/login.py`/`api/callback.py`/`api/logout.py`
-functions as long as they all share the same `SESSION_SECRET_KEY` (they do,
-via `worcadian_agent/session.py`). The "Log out" link on the dashboard hits
-`/api/logout`, which clears the local session cookie *and* redirects through
-Auth0's own `/v2/logout` endpoint (back to `/`, the public landing page) —
-that second part matters because Auth0 keeps its own SSO session independent
-of our cookie, so skipping it would let a user get silently re-authenticated
+`itsdangerous`, configured in `worcadian_agent/session.py`), not server-side
+storage. The "Log out" link on the dashboard hits `/auth/logout`, which
+clears the local session cookie *and* redirects through Auth0's own
+`/v2/logout` endpoint (back to `/`, the public landing page) — that second
+part matters because Auth0 keeps its own SSO session independent of our
+cookie, so skipping it would let a user get silently re-authenticated
 without re-entering credentials.
 
 Auth0's free tier can itself delegate to Google, GitHub, email/password, etc.
@@ -217,18 +212,15 @@ pip install -r requirements.txt
 cp .env.example .env   # then fill in at least one LLM provider's API key,
                         # plus the OAuth vars (PUBLIC_BASE_URL=http://localhost:8000
                         # for local testing) with a callback URL of
-                        # http://localhost:8000/api/callback registered in
+                        # http://localhost:8000/auth/callback registered in
                         # the Auth0 dashboard
 
-vercel dev
+uvicorn api.app:app --reload
 ```
 
-`vercel dev` serves the whole site (all six functions, including `/` via
-`api/welcome.py`) together on one port (`http://localhost:3000` by default),
-matching production. Running a single function directly with
-`uvicorn api.home:app --reload`, etc. also works for poking at one endpoint
-in isolation, at its native path (e.g. `/api/home`, `/api/login`,
-`/api/welcome`).
+Then open `http://localhost:8000`. Since it's one plain FastAPI app, plain
+`uvicorn` matches production routing exactly — no need for `vercel dev`
+just to exercise the login flow.
 
 ## Deploying to Vercel
 
@@ -255,16 +247,16 @@ Project Settings → Environment Variables.
 
 ## API endpoints
 
-- `GET /` — the public landing page (rewritten to `api/welcome.py`, no login
-  needed): "Worcadian Agent" and a "Log in" button pointing at `/api/login`.
-- `GET /api/login` — redirects to Auth0's login page.
-- `GET /api/callback` — Auth0 redirects back here with the auth code;
+- `GET /` — the public landing page (`index.html`, no login needed):
+  "Worcadian Agent" and a "Log in" button pointing at `/auth/login`.
+- `GET /auth/login` — redirects to Auth0's login page.
+- `GET /auth/callback` — Auth0 redirects back here with the auth code;
   exchanges it for the account's email, checks `ALLOWED_EMAILS`, and sets the
   session cookie (or shows an error/access-denied page), then redirects to
-  `/api/home`.
-- `GET /api/home` — the OAuth-gated dashboard (`dashboard.html`). Redirects
+  `/dashboard`.
+- `GET /dashboard` — the OAuth-gated dashboard (`dashboard.html`). Redirects
   to `/` if there's no valid, allowlisted session.
-- `GET /api/logout` — clears the session cookie and redirects through
+- `GET /auth/logout` — clears the session cookie and redirects through
   Auth0's own logout endpoint back to `/`.
 - `POST /api/press-release` — requires a valid session (401 if not logged
   in). Body `{"day": 120}` (or `{"day": null}`/omitted for the current game
@@ -282,9 +274,9 @@ Project Settings → Environment Variables.
 
 **`/` (`index.html`)** is a public landing page needing no login: just the
 title "Worcadian Agent" and a "Log in" button that sends the browser to
-`/api/login`.
+`/auth/login`.
 
-**The dashboard (`dashboard.html`, served at `GET /api/home`** once logged
+**The dashboard (`dashboard.html`, served at `GET /dashboard`** once logged
 in — see **Configuring OAuth login**) has a "Log out" link next to the
 subtitle, a game-day number field (leave blank to use the current game day),
 and an **Execute Daily Tasks** button that calls `POST /api/press-release`
@@ -295,7 +287,7 @@ the *last* looked-up word — rendered on demand by
 `worcadian_agent/image_card.py` (word, part of speech, and definition in,
 PNG bytes out) and returned inline as a base64 `data:` URI in the API
 response, with no file persisted anywhere. If the session has expired, the
-button redirects to `/api/login` instead of showing an error.
+button redirects to `/auth/login` instead of showing an error.
 
 The favicon (both pages) is the Worcadian logo, loaded directly from
 `https://whatgamestudios.com/worcadian/worcadian-logo.png`.

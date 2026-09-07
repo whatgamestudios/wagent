@@ -1,13 +1,10 @@
 """Shared session-cookie configuration for the OAuth-gated site.
 
-Each api/*.py file (see api/app.py, api/home.py, api/login.py,
-api/callback.py, api/logout.py) is deployed as its own separate Vercel
-serverless function -- but Starlette's SessionMiddleware stores session data
-in a signed cookie (via itsdangerous), not server-side memory. As long as
-every function adds the middleware with the SAME SESSION_SECRET_KEY, a cookie
-set by one function (e.g. the OAuth callback, which sets user_email) is fully
-readable by another (e.g. the home page, which checks it) -- no shared state
-between the separately deployed functions is needed.
+Everything lives in one FastAPI app (api/app.py -- see its module docstring
+for why), but this stays a separate module since it's genuinely reusable
+config: Starlette's SessionMiddleware stores session data in a signed cookie
+(via itsdangerous), not server-side memory, so nothing here depends on
+running inside any particular process.
 
 Env vars:
     SESSION_SECRET_KEY   required -- random secret used to sign the session

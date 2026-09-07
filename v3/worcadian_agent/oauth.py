@@ -2,13 +2,13 @@
 
 Standard flow against your Auth0 tenant:
     1. build_authorize_url(state) -- send the browser here to log in
-    2. Auth0 redirects back to PUBLIC_BASE_URL + "/api/callback" with
+    2. Auth0 redirects back to PUBLIC_BASE_URL + "/auth/callback" with
        ?code=...&state=...
     3. exchange_code_for_email(code) -- trades the code for an access token,
        then calls Auth0's /userinfo endpoint to get the verified email
     4. is_email_allowed(email) -- checks it against ALLOWED_EMAILS
     5. build_logout_url() -- also ends the Auth0-side SSO session, not just
-       our own cookie (see api/logout.py)
+       our own cookie (see the /auth/logout route in api/app.py)
 
 Env vars:
     AUTH0_DOMAIN          required, e.g. "your-tenant.us.auth0.com" (no
@@ -17,7 +17,7 @@ Env vars:
     AUTH0_CLIENT_ID       required -- from an Auth0 "Regular Web Application"
     AUTH0_CLIENT_SECRET   required
     PUBLIC_BASE_URL       required, e.g. "https://worcadian-agent.vercel.app"
-                          (no trailing slash) -- PUBLIC_BASE_URL + /api/callback
+                          (no trailing slash) -- PUBLIC_BASE_URL + /auth/callback
                           must be listed in the Auth0 application's Allowed
                           Callback URLs, and PUBLIC_BASE_URL itself in its
                           Allowed Logout URLs
@@ -37,7 +37,7 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-CALLBACK_PATH = "/api/callback"
+CALLBACK_PATH = "/auth/callback"
 
 
 def _required_env(name: str) -> str:

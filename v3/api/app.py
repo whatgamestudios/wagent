@@ -1,42 +1,35 @@
-"""FastAPI app deployed as a Vercel serverless function.
+"""The entire FastAPI app, deployed as ONE Vercel serverless function.
 
-Deliberately not named index.py: "index" is a special filename in Vercel's
-filesystem routing (it collapses to the parent path, the same way
-index.html does for static hosting), which made the rewrite destination
-genuinely ambiguous between "/api" and "/api/index" and cost real debugging
-time. "app.py" has no special meaning, so it can only ever route to exactly
-/api/app -- see vercel.json's "rewrites" entry, which must point there.
+Root-caused after a long detour: Vercel's dashboard confirmed this project's
+deployment builds exactly ONE serverless function ("/fastapi"), regardless of
+how many api/*.py files existed. Vercel had detected "FastAPI" as the
+project's framework and builds the whole thing as a single consolidated app
+-- it does NOT give each api/*.py file its own separate function the way
+plain zero-config Python projects do. Every previous attempt to split
+concerns (login/callback/logout/home/landing) into separate files was
+silently never actually deployed as anything; all traffic was always being
+handled by whichever single file Vercel picked to build as "the" app (this
+one -- api/app.py happened to be it), with that file's own router 404ing on
+paths it didn't define.
 
-IMPORTANT, confirmed empirically (not just from docs): Vercel's rewrite
-preserves the original HTTP method and body but does NOT preserve the
-original request path -- every request under /api/* arrives here with
-request.url.path literally equal to "/api/app" (the rewrite's destination),
-regardless of whether the browser called /api/press-release or
-/api/cron/daily-tasks. Only the method still distinguishes them. That's why
-every route below is registered at BOTH its real/friendly path (so direct
-curl, `uvicorn`, and `vercel dev` testing all still work without going
-through a rewrite) AND "/api/app" (what production traffic actually looks
-like once Vercel's rewrite has run) -- do not remove the "/api/app"
-decorator thinking it's a leftover duplicate.
+The fix: put EVERY route for the whole site in this one file, using plain,
+standard FastAPI paths. No rewrite gymnastics needed -- FastAPI's own router
+correctly dispatches on the real, undisturbed request path once there's
+only one app and it actually owns every route.
 
-Routes (see vercel.json for how /api/* is rewritten to this file):
-    POST /api/press-release     build a press release on demand (used by the
-                                 site's "Execute Daily Tasks" button); requires
-                                 an OAuth session (see worcadian_agent/oauth.py)
-    GET  /api/cron/daily-tasks  the scheduled daily_tasks job Vercel Cron hits;
-                                 protected by CRON_SECRET, not OAuth, since it's
-                                 machine-triggered
-
-The OAuth-gated home page itself (GET /) lives in api/home.py, not here --
-see that file's docstring for why each concern gets its own dedicated
-function file rather than being folded into this one.
+Routes:
+    GET  /                      public landing page (index.html), no login needed
+    GET  /auth/login            starts the Auth0 login flow
+    GET  /auth/callback         Auth0 redirects back here with the auth code
+    GET  /auth/logout           clears the session + Auth0 logout
+    GET  /dashboard             the OAuth-gated dashboard (dashboard.html)
+    POST /api/press-release     build a press release on demand; requires a session
+    GET  /api/cron/daily-tasks  the scheduled daily_tasks job; protected by
+                                 CRON_SECRET (not OAuth -- it's machine-triggered)
 
 Logging: configured (via app_setup.configure_app) so every logger.info()/
 logger.exception() call in this module and in worcadian_agent.* reaches
-stderr, which Vercel captures as Function Logs. A request-logging middleware
-logs every request that actually reaches this app (method, path, status,
-duration) -- if a request doesn't show up there at all, it never reached the
-Python function (a routing/rewrite problem, not an app-code problem).
+stderr, which Vercel captures as Function Logs.
 """
 
 from __future__ import annotations
@@ -57,6 +50,7 @@ logger = logging.getLogger("worcadian_agent.api")
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 
 load_dotenv()
@@ -66,12 +60,91 @@ from worcadian_agent.app_setup import configure_app  # noqa: E402
 from worcadian_agent.daily_tasks import daily_tasks  # noqa: E402
 from worcadian_agent.dictionary_client import lookup_words  # noqa: E402
 from worcadian_agent.image_card import generate_word_card_bytes  # noqa: E402
-from worcadian_agent.oauth import is_email_allowed  # noqa: E402
+from worcadian_agent.oauth import (  # noqa: E402
+    build_authorize_url,
+    build_logout_url,
+    exchange_code_for_email,
+    is_email_allowed,
+    new_state,
+)
 
 app = FastAPI()
 configure_app(app, logger)
 
 OUTPUT_DIR = "/tmp/output"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+INDEX_HTML_PATH = PROJECT_ROOT / "index.html"
+DASHBOARD_HTML_PATH = PROJECT_ROOT / "dashboard.html"
+
+
+# --- Public landing page ---------------------------------------------------
+
+
+@app.get("/")
+def landing():
+    return HTMLResponse(INDEX_HTML_PATH.read_text())
+
+
+# --- Auth0 login / callback / logout ---------------------------------------
+
+
+@app.get("/auth/login")
+def login(request: Request):
+    state = new_state()
+    request.session["oauth_state"] = state
+    return RedirectResponse(url=build_authorize_url(state))
+
+
+@app.get("/auth/callback")
+def callback(request: Request):
+    error = request.query_params.get("error")
+    if error:
+        logger.warning("oauth callback error=%s", error)
+        return HTMLResponse(f"<p>Login failed: {error}</p>", status_code=400)
+
+    code = request.query_params.get("code")
+    state = request.query_params.get("state")
+    expected_state = request.session.pop("oauth_state", None)
+    if not code or not state or not expected_state or state != expected_state:
+        logger.warning("oauth callback: missing or mismatched state (possible CSRF or expired attempt)")
+        return HTMLResponse("<p>Login failed: invalid or expired login attempt. Please try again.</p>", status_code=400)
+
+    try:
+        email = exchange_code_for_email(code)
+    except Exception:
+        logger.exception("oauth callback: token exchange failed")
+        return HTMLResponse("<p>Login failed.</p>", status_code=400)
+
+    if not is_email_allowed(email):
+        logger.warning("oauth callback: email=%s is not in ALLOWED_EMAILS", email)
+        return HTMLResponse("<p>Access denied: this account is not authorized to use this app.</p>", status_code=403)
+
+    request.session["user_email"] = email
+    logger.info("oauth callback: login succeeded email=%s", email)
+    return RedirectResponse(url="/dashboard")
+
+
+@app.get("/auth/logout")
+def logout(request: Request):
+    email = request.session.get("user_email")
+    request.session.clear()
+    logger.info("logout: cleared local session for email=%s; redirecting to Auth0 logout", email)
+    return RedirectResponse(url=build_logout_url())
+
+
+# --- OAuth-gated dashboard ---------------------------------------------------
+
+
+@app.get("/dashboard")
+def dashboard(request: Request):
+    email = request.session.get("user_email")
+    if not email or not is_email_allowed(email):
+        logger.info("dashboard: no valid session (email=%s); redirecting to the public landing page", email)
+        return RedirectResponse(url="/")
+    return HTMLResponse(DASHBOARD_HTML_PATH.read_text())
+
+
+# --- Press release (button) + daily_tasks (cron) ----------------------------
 
 
 def _build_word_card_data_url(definitions: dict[str, dict]) -> str | None:
@@ -103,7 +176,6 @@ class PressReleaseRequest(BaseModel):
 
 
 @app.post("/api/press-release")
-@app.post("/api/app")  # see module docstring: production traffic arrives at this path, not the one above
 def generate_press_release(payload: PressReleaseRequest, request: Request) -> dict:
     email = request.session.get("user_email")
     if not email or not is_email_allowed(email):
@@ -135,7 +207,6 @@ def generate_press_release(payload: PressReleaseRequest, request: Request) -> di
 
 
 @app.get("/api/cron/daily-tasks")
-@app.get("/api/app")  # see module docstring: production traffic arrives at this path, not the one above
 def run_daily_tasks(authorization: str | None = Header(default=None)) -> dict:
     logger.info("daily-tasks cron invoked")
     cron_secret = os.getenv("CRON_SECRET")

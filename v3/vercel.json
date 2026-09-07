@@ -1,19 +1,6 @@
 {
-  "rewrites": [
-    { "source": "/", "destination": "/api/welcome" },
-    { "source": "/api/press-release", "destination": "/api/app" },
-    { "source": "/api/cron/daily-tasks", "destination": "/api/app" }
-  ],
   "functions": {
-    "api/app.py": { "maxDuration": 60 },
-    "api/welcome.py": { "maxDuration": 10 },
-    "api/home.py": { "maxDuration": 15 },
-    "api/login.py": { "maxDuration": 10 },
-    "api/callback.py": { "maxDuration": 15 },
-    "api/logout.py": { "maxDuration": 10 },
-    "api/health.py": { "maxDuration": 10 },
-    "api/health_logging.py": { "maxDuration": 10 },
-    "api/health_session.py": { "maxDuration": 10 }
+    "api/app.py": { "maxDuration": 60 }
   },
   "crons": [
     { "path": "/api/cron/daily-tasks", "schedule": "0 0 * * *" }

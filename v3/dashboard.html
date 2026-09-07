@@ -140,7 +140,7 @@
     <h1>Worcadian Agent</h1>
     <p class="subtitle">
       Daily press release generator ·
-      <a href="/api/logout" style="color: var(--accent);">Log out</a>
+      <a href="/auth/logout" style="color: var(--accent);">Log out</a>
     </p>
 
     <div class="panel">
@@ -221,7 +221,7 @@
           body: JSON.stringify({ day }),
         });
         if (response.status === 401) {
-          window.location.href = "/api/login";
+          window.location.href = "/auth/login";
           return;
         }
         const data = await response.json();
