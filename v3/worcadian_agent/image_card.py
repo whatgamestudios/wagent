@@ -121,11 +121,18 @@ def _fit_wrapped_text(
     max_width: int,
     max_height: float,
     font_dir: str | Path | None,
-    start_size: int,
-    min_size: int = 18,
+    max_size: int,
+    min_size: int,
 ) -> tuple[ImageFont.FreeTypeFont, list[str], float]:
-    """Shrink font size until the wrapped block of `text` fits within max_height."""
-    size = start_size
+    """Find the largest font size (starting from `max_size`, shrinking as needed)
+    whose wrapped block of `text` fits within max_height.
+
+    `max_size` should be generous relative to the available box -- this only
+    ever shrinks, never grows, so a `max_size` that's small relative to
+    max_height leaves short text tiny with empty space below it rather than
+    filling the space.
+    """
+    size = max_size
     while True:
         font = _load_font(style, size, font_dir)
         lines = _wrap_to_width(draw, text, font, max_width)
@@ -219,11 +226,16 @@ def _render_card_image(
     available_height = footer_y - round(height * 0.03) - y
     meaning_font, meaning_lines, line_height = _fit_wrapped_text(
         draw, meaning.strip(), "italic", content_width, available_height, font_dir,
-        start_size=round(width * 0.032),
+        max_size=round(width * 0.075), min_size=round(width * 0.022),
     )
+    # Center the wrapped block within the available space rather than pinning it
+    # to the top -- otherwise short definitions leave all the leftover room as
+    # dead space below the text instead of it being distributed evenly.
+    block_height = line_height * len(meaning_lines)
+    text_y = y + max(0, (available_height - block_height) / 2)
     for line in meaning_lines:
-        _draw_centered(draw, y, line, meaning_font, INK, width)
-        y += line_height
+        _draw_centered(draw, text_y, line, meaning_font, INK, width)
+        text_y += line_height
 
     _draw_centered(draw, footer_y, footer_text, footer_font, ACCENT, width, tracking=round(width * 0.003))
 
