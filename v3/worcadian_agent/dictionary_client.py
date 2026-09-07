@@ -67,7 +67,7 @@ def lookup_word(word: str, api_key: str | None = None) -> dict | None:
     the first entry Merriam-Webster returns, or None if the word wasn't
     recognized (the API returned spelling suggestions instead of an entry).
     """
-    api_key = api_key or os.getenv("MERRIAM_WEBSTER_API_KEY")
+    api_key = (api_key or os.getenv("MERRIAM_WEBSTER_API_KEY") or "").strip()
     if not api_key:
         raise RuntimeError("MERRIAM_WEBSTER_API_KEY is not set.")
 
@@ -80,7 +80,31 @@ def lookup_word(word: str, api_key: str | None = None) -> dict | None:
         logger.exception("dictionary lookup failed word=%s", word)
         raise
 
-    entries = resp.json()
+    if not resp.text.strip():
+        # Merriam-Webster's API often returns HTTP 200 with an EMPTY body for an
+        # invalid/inactive key, or a key registered for a different product
+        # (Thesaurus, Medical, Spanish, Learner's, ...) rather than the
+        # Collegiate Dictionary specifically -- surface that clearly instead of
+        # letting resp.json() fail deep in a JSONDecodeError.
+        logger.error(
+            "dictionary lookup word=%s: empty response body (http status=%s) -- "
+            "MERRIAM_WEBSTER_API_KEY is likely invalid, not yet active, or is a key "
+            "for a different Merriam-Webster product (must be the Collegiate "
+            "Dictionary API specifically)",
+            word, resp.status_code,
+        )
+        raise RuntimeError(
+            "Merriam-Webster API returned an empty response body. Check that "
+            "MERRIAM_WEBSTER_API_KEY is a valid, active key for the Collegiate "
+            "Dictionary API (not Thesaurus/Medical/Spanish/Learner's)."
+        )
+
+    try:
+        entries = resp.json()
+    except ValueError:
+        logger.error("dictionary lookup word=%s: non-JSON response body: %r", word, resp.text[:300])
+        raise RuntimeError(f"Merriam-Webster API returned a non-JSON response for {word!r}: {resp.text[:300]!r}")
+
     if not entries or not isinstance(entries[0], dict):
         logger.info("dictionary lookup: %s not recognized (no entry returned)", word)
         return None
@@ -102,7 +126,7 @@ def lookup_words(words: list[str], api_key: str | None = None) -> dict[str, dict
     """Look up multiple words. Returns {WORD: entry} for each word found; words that
     error out or aren't recognized are logged and simply omitted, not raised."""
     results: dict[str, dict] = {}
-    if not (api_key or os.getenv("MERRIAM_WEBSTER_API_KEY")):
+    if not (api_key or os.getenv("MERRIAM_WEBSTER_API_KEY") or "").strip():
         logger.warning("dictionary lookups skipped: MERRIAM_WEBSTER_API_KEY is not set")
         return results
 
