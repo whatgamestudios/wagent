@@ -35,6 +35,14 @@ configure_app(app, logger)
 INDEX_HTML_PATH = Path(__file__).resolve().parent.parent / "index.html"
 
 
+# Registered at both the function's native address AND "/": if Vercel's ASGI
+# adapter sets scope["root_path"] to this function's own address and leaves
+# scope["path"] as "" or "/" (Starlette's router matches on the bare "path",
+# while request.url.path -- what our own logging prints -- reconstructs
+# root_path + path, which would print "/api/landing" either way and mask the
+# mismatch), only the "/" registration would actually match. Covering both
+# costs nothing and removes the guesswork.
 @app.get("/api/landing")
+@app.get("/")
 def landing():
     return HTMLResponse(INDEX_HTML_PATH.read_text())

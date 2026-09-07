@@ -24,7 +24,19 @@ def configure_app(app: FastAPI, logger: logging.Logger) -> None:
     @app.middleware("http")
     async def log_requests(request: Request, call_next):
         start = time.monotonic()
-        logger.info("request start method=%s path=%s", request.method, request.url.path)
+        # Deliberately log the RAW ASGI scope fields (not just request.url.path,
+        # which reconstructs root_path + path and can look identical to the
+        # native address even when the router is matching on a different, bare
+        # "path" -- exactly the kind of mismatch that produced a same-looking
+        # log line but a 404 from Starlette's own router in production once).
+        logger.info(
+            "request start method=%s url_path=%s scope_path=%r scope_root_path=%r scope_raw_path=%r",
+            request.method,
+            request.url.path,
+            request.scope.get("path"),
+            request.scope.get("root_path"),
+            request.scope.get("raw_path"),
+        )
         try:
             response = await call_next(request)
         except Exception:
