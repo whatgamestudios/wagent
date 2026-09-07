@@ -6,9 +6,10 @@ A FastAPI app, deployed to [Vercel](https://vercel.com), that generates the dail
 - **On a schedule** — a Vercel Cron Job hits `daily_tasks` once a day (default
   midnight UTC), which builds the press release and emails it via
   [Resend](https://resend.com) to a configured list of recipients.
-- **On demand** — the root page (`index.html`) has an "Execute Daily Tasks"
-  button that generates a press release for a chosen (or the current) game
-  day and shows it in an output box, without sending any email.
+- **On demand** — the logged-in dashboard page (`dashboard.html`) has an
+  "Execute Daily Tasks" button that generates a press release for a chosen
+  (or the current) game day and shows it in an output box, without sending
+  any email.
 
 The word-puzzle logic itself (`worcadian_agent/`) is carried over unchanged
 from [v2](../v2/); see [v2/DESIGN.md](../v2/DESIGN.md) for how the pipeline
@@ -17,8 +18,9 @@ instead of run from the command line, LLM calls go through an ordered
 **fallback chain of up to five optional providers**, and successful runs can
 be emailed out automatically.
 
-The whole site requires Auth0 sign-in — see **Configuring OAuth login**
-below.
+The site is two pages: a public landing page at `/` with a "Log in" button,
+and a logged-in dashboard (the actual tool) behind Auth0 — see **Configuring
+OAuth login** below.
 
 ## Project layout
 
@@ -26,24 +28,28 @@ below.
 v3/
   api/
     app.py                 press-release + cron endpoints (Vercel function)
-    home.py                serves index.html, gated by OAuth session (Vercel function)
-    login.py               starts the Auth0 login flow (Vercel function)
-    callback.py            handles Auth0's OAuth redirect (Vercel function)
-    logout.py              clears the session (Vercel function)
+    home.py                serves dashboard.html at /api/home, gated by session (Vercel function)
+    login.py               starts the Auth0 login flow at /api/login (Vercel function)
+    callback.py            handles Auth0's redirect at /api/callback (Vercel function)
+    logout.py              clears the session at /api/logout (Vercel function)
   worcadian_agent/         the press-release pipeline (fetch data, score words,
                             call the LLM, write the release; + daily_tasks/email;
                             + oauth.py/session.py/app_setup.py for login)
-  index.html               the page itself (served by api/home.py, not statically)
+  index.html               public landing page ("/") -- real static file, no login needed
+  dashboard.html           the actual tool, served by api/home.py once logged in
   vercel.json              routing, cron schedule, function config
   requirements.txt
   .env.example
 ```
 
 Each `api/*.py` file is deployed as its own separate Vercel serverless
-function — see `api/home.py`'s module docstring for why (in short: sharing
-one function across multiple distinct GET endpoints via a rewrite ran into a
-real gotcha where the rewrite collapses the request path, so each concern
-gets its own dedicated function+route instead).
+function, at its plain zero-config address (`api/home.py` → `/api/home`,
+etc.) — see `api/home.py`'s module docstring for why none of the auth routes
+use a prettier custom-rewritten URL like `/auth/login`: those rewrites
+repeatedly misbehaved in production in ways that were never fully pinned
+down, so every auth route now uses its native `/api/<filename>` address
+directly instead. `/` itself is a genuinely static `index.html` with no
+rewrite at all — the one part of this that's never had a routing problem.
 
 ## Configuring LLM providers
 
@@ -126,20 +132,24 @@ release text).
 
 ## Configuring OAuth login
 
-The website (`GET /`) and the on-demand "Execute Daily Tasks" button
-(`POST /api/press-release`) both require a logged-in, allowlisted account via
-[Auth0](https://auth0.com) — see `worcadian_agent/oauth.py`. The Vercel Cron
-Job (`GET /api/cron/daily-tasks`) is **not** OAuth-gated (it's protected by
+`/` is a public landing page (just "Worcadian Agent" and a "Log in" button —
+no session required to view it). The actual dashboard (`GET /api/home`) and
+the on-demand "Execute Daily Tasks" button (`POST /api/press-release`) both
+require a logged-in, allowlisted account via [Auth0](https://auth0.com) —
+see `worcadian_agent/oauth.py`. The Vercel Cron Job
+(`GET /api/cron/daily-tasks`) is **not** OAuth-gated (it's protected by
 `CRON_SECRET` instead), since it's a machine-to-machine call that can't go
 through a browser login flow.
 
 1. In the [Auth0 dashboard](https://manage.auth0.com/), go to **Applications
    → Create Application**, choose **Regular Web Applications**.
 2. In that application's **Settings** tab, add to **Allowed Callback URLs**:
-   `<PUBLIC_BASE_URL>/auth/callback`, e.g.
-   `https://worcadian-agent.vercel.app/auth/callback`; and add
-   `<PUBLIC_BASE_URL>` (no path) to **Allowed Logout URLs**. Both must match
-   `PUBLIC_BASE_URL` below exactly (scheme included, no trailing slash).
+   `<PUBLIC_BASE_URL>/api/callback`, e.g.
+   `https://worcadian-agent.vercel.app/api/callback` (note: `/api/callback`,
+   *not* `/auth/callback` — see the project layout note above on why); and
+   add `<PUBLIC_BASE_URL>` (no path) to **Allowed Logout URLs**. Both must
+   match `PUBLIC_BASE_URL` below exactly (scheme included, no trailing
+   slash).
 3. Set these env vars:
    - `AUTH0_DOMAIN` — your tenant domain shown on that Settings page, e.g.
      `your-tenant.us.auth0.com` (no scheme, no trailing slash).
@@ -158,12 +168,12 @@ The session is a signed cookie (via Starlette's `SessionMiddleware` /
 `itsdangerous`), not server-side storage, so it works fine across the
 separate `api/home.py`/`api/login.py`/`api/callback.py`/`api/logout.py`
 functions as long as they all share the same `SESSION_SECRET_KEY` (they do,
-via `worcadian_agent/session.py`). The "Log out" link on the page hits
-`/auth/logout`, which clears the local session cookie *and* redirects
-through Auth0's own `/v2/logout` endpoint — that second part matters because
-Auth0 keeps its own SSO session independent of our cookie, so skipping it
-would let a user get silently re-authenticated without re-entering
-credentials.
+via `worcadian_agent/session.py`). The "Log out" link on the dashboard hits
+`/api/logout`, which clears the local session cookie *and* redirects through
+Auth0's own `/v2/logout` endpoint (back to `/`, the public landing page) —
+that second part matters because Auth0 keeps its own SSO session independent
+of our cookie, so skipping it would let a user get silently re-authenticated
+without re-entering credentials.
 
 Auth0's free tier can itself delegate to Google, GitHub, email/password, etc.
 as "social connections" if you want those sign-in options — that's
@@ -202,22 +212,20 @@ pip install -r requirements.txt
 
 cp .env.example .env   # then fill in at least one LLM provider's API key,
                         # plus the OAuth vars (PUBLIC_BASE_URL=http://localhost:8000
-                        # for local testing) with a redirect URI of
-                        # http://localhost:8000/auth/callback registered in
-                        # Auth0 dashboard
+                        # for local testing) with a callback URL of
+                        # http://localhost:8000/api/callback registered in
+                        # the Auth0 dashboard
 
 vercel dev
 ```
 
-Since the site is now split across five separate functions (`api/app.py`,
-`home.py`, `login.py`, `callback.py`, `logout.py`) tied together by
-`vercel.json`'s rewrites, `vercel dev` (which applies those same rewrites
-locally) is the only way to exercise the full logged-in flow with one
-command; open `http://localhost:3000` (its default port). Running a single
-function directly with `uvicorn api.home:app --reload`, etc. still works for
-poking at one endpoint in isolation via its friendly path (e.g. `/` on
-`api.home`, `/auth/login` on `api.login`), since each file registers its
-route at both its friendly path and its Vercel-assigned one.
+`vercel dev` serves the whole site (the static `/` landing page plus all
+five functions) together on one port (`http://localhost:3000` by default),
+matching production. Running a single function directly with
+`uvicorn api.home:app --reload`, etc. also works for poking at one endpoint
+in isolation, at its native path (e.g. `/api/home`, `/api/login`) — but
+won't serve the static landing page itself, since that's not part of any
+function.
 
 ## Deploying to Vercel
 
@@ -244,20 +252,24 @@ Project Settings → Environment Variables.
 
 ## API endpoints
 
-- `GET /` — the OAuth-gated home page. Redirects to `/auth/login` if there's
-  no valid, allowlisted session.
-- `GET /auth/login` — redirects to Auth0's login page.
-- `GET /auth/callback` — Auth0 redirects back here with the auth code;
+- `GET /` — the public landing page (static `index.html`, no login needed):
+  "Worcadian Agent" and a "Log in" button pointing at `/api/login`.
+- `GET /api/login` — redirects to Auth0's login page.
+- `GET /api/callback` — Auth0 redirects back here with the auth code;
   exchanges it for the account's email, checks `ALLOWED_EMAILS`, and sets the
-  session cookie (or shows an error/access-denied page).
-- `GET /auth/logout` — clears the session cookie and redirects to `/`.
+  session cookie (or shows an error/access-denied page), then redirects to
+  `/api/home`.
+- `GET /api/home` — the OAuth-gated dashboard (`dashboard.html`). Redirects
+  to `/` if there's no valid, allowlisted session.
+- `GET /api/logout` — clears the session cookie and redirects through
+  Auth0's own logout endpoint back to `/`.
 - `POST /api/press-release` — requires a valid session (401 if not logged
   in). Body `{"day": 120}` (or `{"day": null}`/omitted for the current game
   day). Returns `{"game_day": ..., "text": ..., "definitions": {...}, "card_image": ...}`,
   where `definitions` maps each looked-up word to
   `{part_of_speech, definition, short_definition}` and `card_image` is a
-  base64 `data:image/png;...` URI (or `null`). Used by the page's "Execute
-  Daily Tasks" button; does not send email.
+  base64 `data:image/png;...` URI (or `null`). Used by the dashboard's
+  "Execute Daily Tasks" button; does not send email.
 - `GET /api/cron/daily-tasks` — builds the press release for the current game
   day, looks up its words, and emails everything to `EMAIL_RECIPIENTS`. This
   is what the Vercel Cron Job calls; protected by the `CRON_SECRET` bearer
@@ -265,10 +277,14 @@ Project Settings → Environment Variables.
 
 ## The website
 
-The page (`index.html`, served by `api/home.py` — see **Configuring OAuth
-login**) is titled **Worcadian Agent**, with a "Log out" link next to the
-subtitle. It has a game-day number field (leave blank to use the current game
-day) and an **Execute Daily Tasks** button that calls `POST /api/press-release`
+**`/` (`index.html`)** is a public landing page needing no login: just the
+title "Worcadian Agent" and a "Log in" button that sends the browser to
+`/api/login`.
+
+**The dashboard (`dashboard.html`, served at `GET /api/home`** once logged
+in — see **Configuring OAuth login**) has a "Log out" link next to the
+subtitle, a game-day number field (leave blank to use the current game day),
+and an **Execute Daily Tasks** button that calls `POST /api/press-release`
 and displays the generated press release in the output text box, followed by
 one read-only text box per looked-up word showing its part of speech,
 definition, and short definition. Below that, a word card image is shown for
@@ -276,6 +292,7 @@ the *last* looked-up word — rendered on demand by
 `worcadian_agent/image_card.py` (word, part of speech, and definition in,
 PNG bytes out) and returned inline as a base64 `data:` URI in the API
 response, with no file persisted anywhere. If the session has expired, the
-button redirects to `/auth/login` instead of showing an error. The favicon is
-the Worcadian logo, loaded directly from
+button redirects to `/api/login` instead of showing an error.
+
+The favicon (both pages) is the Worcadian logo, loaded directly from
 `https://whatgamestudios.com/worcadian/worcadian-logo.png`.

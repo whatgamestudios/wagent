@@ -1,8 +1,6 @@
-"""Clears the session and ends the Auth0-side SSO session too.
-vercel.json rewrites /auth/logout here.
-
-See api/home.py's docstring for why this is its own dedicated function file.
-"""
+"""Clears the session and ends the Auth0-side SSO session too, at its plain
+native address /api/logout (see api/home.py's docstring for why this doesn't
+use a "/auth/logout" rewrite)."""
 
 from __future__ import annotations
 
@@ -28,8 +26,7 @@ app = FastAPI()
 configure_app(app, logger)
 
 
-@app.get("/auth/logout")
-@app.get("/api/logout")  # friendly alias for local uvicorn/vercel-dev testing
+@app.get("/api/logout")
 def logout(request: Request):
     email = request.session.get("user_email")
     request.session.clear()

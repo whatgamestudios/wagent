@@ -1,7 +1,7 @@
-"""Handles Auth0's OAuth redirect back. vercel.json rewrites /auth/callback here.
-
-See api/home.py's docstring for why this is its own dedicated function file.
-"""
+"""Handles Auth0's OAuth redirect back, at its plain native address
+/api/callback (see api/home.py's docstring for why this doesn't use a
+"/auth/callback" rewrite). This exact URL (PUBLIC_BASE_URL + /api/callback)
+must be registered in the Auth0 application's Allowed Callback URLs."""
 
 from __future__ import annotations
 
@@ -27,8 +27,7 @@ app = FastAPI()
 configure_app(app, logger)
 
 
-@app.get("/auth/callback")
-@app.get("/api/callback")  # friendly alias for local uvicorn/vercel-dev testing
+@app.get("/api/callback")
 def callback(request: Request):
     error = request.query_params.get("error")
     if error:
@@ -54,4 +53,4 @@ def callback(request: Request):
 
     request.session["user_email"] = email
     logger.info("oauth callback: login succeeded email=%s", email)
-    return RedirectResponse(url="/")
+    return RedirectResponse(url="/api/home")

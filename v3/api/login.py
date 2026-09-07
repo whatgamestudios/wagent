@@ -1,7 +1,6 @@
-"""Starts the Auth0 login flow. vercel.json rewrites /auth/login here.
-
-See api/home.py's docstring for why this is its own dedicated function file.
-"""
+"""Starts the Auth0 login flow, at its plain native address /api/login
+(see api/home.py's docstring for why this doesn't use a "/auth/login"
+rewrite)."""
 
 from __future__ import annotations
 
@@ -27,8 +26,7 @@ app = FastAPI()
 configure_app(app, logger)
 
 
-@app.get("/auth/login")
-@app.get("/api/login")  # friendly alias for local uvicorn/vercel-dev testing
+@app.get("/api/login")
 def login(request: Request):
     state = new_state()
     request.session["oauth_state"] = state

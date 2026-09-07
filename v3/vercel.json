@@ -1,10 +1,7 @@
 {
   "rewrites": [
-    { "source": "/", "destination": "/api/home" },
-    { "source": "/auth/login", "destination": "/api/login" },
-    { "source": "/auth/callback", "destination": "/api/callback" },
-    { "source": "/auth/logout", "destination": "/api/logout" },
-    { "source": "/api/:path*", "destination": "/api/app" }
+    { "source": "/api/press-release", "destination": "/api/app" },
+    { "source": "/api/cron/daily-tasks", "destination": "/api/app" }
   ],
   "functions": {
     "api/app.py": { "maxDuration": 60 },

@@ -31,216 +31,41 @@
       color: var(--ink);
       font-family: Georgia, "Times New Roman", serif;
       display: flex;
+      align-items: center;
       justify-content: center;
       padding: 2.5rem 1.25rem;
     }
     main {
       width: 100%;
-      max-width: 720px;
-    }
-    h1 {
+      max-width: 480px;
       text-align: center;
-      letter-spacing: 0.04em;
-      margin: 0 0 0.25rem;
-    }
-    .subtitle {
-      text-align: center;
-      color: var(--accent);
-      font-style: italic;
-      margin: 0 0 2rem;
-    }
-    .panel {
       background: var(--panel);
       border: 1px solid var(--border);
       border-radius: 6px;
-      padding: 1.5rem;
+      padding: 3rem 2rem;
     }
-    label {
-      display: block;
-      font-weight: bold;
-      margin-bottom: 0.4rem;
+    h1 {
+      letter-spacing: 0.04em;
+      margin: 0 0 2rem;
     }
-    .controls {
-      display: flex;
-      gap: 0.75rem;
-      flex-wrap: wrap;
-      align-items: flex-end;
-      margin-bottom: 1.25rem;
-    }
-    .field { flex: 1 1 200px; }
-    input[type="number"] {
-      width: 100%;
-      padding: 0.55rem 0.65rem;
-      font-size: 1rem;
-      font-family: inherit;
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      background: var(--bg);
-      color: var(--ink);
-    }
-    button {
-      padding: 0.6rem 1.1rem;
+    a.login-button {
+      display: inline-block;
+      padding: 0.7rem 1.75rem;
       font-size: 1rem;
       font-family: inherit;
       font-weight: bold;
+      text-decoration: none;
       border: 1px solid var(--accent);
       border-radius: 4px;
       background: var(--accent);
       color: var(--panel);
-      cursor: pointer;
-      white-space: nowrap;
-    }
-    button:disabled {
-      opacity: 0.6;
-      cursor: wait;
-    }
-    textarea {
-      width: 100%;
-      min-height: 320px;
-      padding: 0.85rem;
-      font-family: Georgia, "Times New Roman", serif;
-      font-size: 0.95rem;
-      line-height: 1.5;
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      background: var(--bg);
-      color: var(--ink);
-      resize: vertical;
-    }
-    .status {
-      min-height: 1.2rem;
-      margin: 0.5rem 0 0.75rem;
-      font-style: italic;
-      color: var(--accent);
-    }
-    .definitions {
-      display: flex;
-      flex-direction: column;
-      gap: 1rem;
-      margin: 0.5rem 0 1.5rem;
-    }
-    .definition-box textarea {
-      min-height: 90px;
-    }
-    .definition-box label {
-      text-transform: uppercase;
-      letter-spacing: 0.03em;
-      font-size: 0.9rem;
-    }
-    #word-card {
-      max-width: 100%;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      margin-top: 0.4rem;
     }
   </style>
 </head>
 <body>
   <main>
     <h1>Worcadian Agent</h1>
-    <p class="subtitle">
-      Daily press release generator ·
-      <a href="/auth/logout" style="color: var(--accent);">Log out</a>
-    </p>
-
-    <div class="panel">
-      <div class="controls">
-        <div class="field">
-          <label for="game-day">Game day</label>
-          <input id="game-day" type="number" min="1" placeholder="Current game day" />
-        </div>
-        <button id="run-button" type="button">Execute Daily Tasks</button>
-      </div>
-
-      <div id="status" class="status"></div>
-
-      <label for="output">Output</label>
-      <textarea id="output" readonly placeholder="The press release will appear here."></textarea>
-
-      <label style="margin-top: 1.25rem;">Word Definitions</label>
-      <div id="definitions" class="definitions"></div>
-
-      <div id="card-section" style="display: none;">
-        <label for="word-card">Word Card</label>
-        <img id="word-card" alt="Word card" />
-      </div>
-    </div>
+    <a class="login-button" href="/api/login">Log in</a>
   </main>
-
-  <script>
-    const runButton = document.getElementById("run-button");
-    const dayInput = document.getElementById("game-day");
-    const output = document.getElementById("output");
-    const status = document.getElementById("status");
-    const definitionsContainer = document.getElementById("definitions");
-    const cardSection = document.getElementById("card-section");
-    const wordCard = document.getElementById("word-card");
-
-    function renderDefinitions(definitions) {
-      definitionsContainer.innerHTML = "";
-      const words = Object.keys(definitions || {});
-      if (words.length === 0) {
-        return;
-      }
-      for (const word of words) {
-        const entry = definitions[word];
-        const wrapper = document.createElement("div");
-        wrapper.className = "definition-box";
-
-        const label = document.createElement("label");
-        label.textContent = entry.part_of_speech ? `${word} (${entry.part_of_speech})` : word;
-
-        const box = document.createElement("textarea");
-        box.readOnly = true;
-        const lines = [];
-        if (entry.definition) lines.push(`Definition: ${entry.definition}`);
-        if (entry.short_definition) lines.push(`Short definition: ${entry.short_definition}`);
-        box.value = lines.join("\n\n") || "No definition available.";
-
-        wrapper.appendChild(label);
-        wrapper.appendChild(box);
-        definitionsContainer.appendChild(wrapper);
-      }
-    }
-
-    runButton.addEventListener("click", async () => {
-      const raw = dayInput.value.trim();
-      const day = raw === "" ? null : Number(raw);
-
-      runButton.disabled = true;
-      status.textContent = "Generating press release...";
-      output.value = "";
-      definitionsContainer.innerHTML = "";
-      cardSection.style.display = "none";
-      wordCard.src = "";
-
-      try {
-        const response = await fetch("/api/press-release", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ day }),
-        });
-        if (response.status === 401) {
-          window.location.href = "/auth/login";
-          return;
-        }
-        const data = await response.json();
-        if (!response.ok) {
-          throw new Error(data.detail || `Request failed with status ${response.status}`);
-        }
-        output.value = data.text;
-        renderDefinitions(data.definitions);
-        if (data.card_image) {
-          wordCard.src = data.card_image;
-          cardSection.style.display = "block";
-        }
-        status.textContent = `Done (game day ${data.game_day ?? "current"}).`;
-      } catch (err) {
-        status.textContent = `Error: ${err.message}`;
-      } finally {
-        runButton.disabled = false;
-      }
-    });
-  </script>
 </body>
 </html>
