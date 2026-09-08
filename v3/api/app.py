@@ -26,6 +26,8 @@ Routes:
     POST /api/press-release     build a press release on demand; requires a session
     POST /api/word-card         render a word card for one word on demand; requires a session
     POST /api/tweet             post a tweet to X via its API; requires a session
+    GET  /api/x/authorize       one-time: starts X's OAuth2 authorization flow; requires a session
+    GET  /api/x/callback        X redirects back here with the auth code; requires a session
     GET  /api/cron/daily-tasks  the scheduled daily_tasks job; protected by
                                  CRON_SECRET (not OAuth -- it's machine-triggered)
 
@@ -69,7 +71,13 @@ from worcadian_agent.oauth import (  # noqa: E402
     is_email_allowed,
     new_state,
 )
-from worcadian_agent.twitter import post_tweet  # noqa: E402
+from worcadian_agent.twitter import (  # noqa: E402
+    build_authorize_url as build_x_authorize_url,
+    exchange_code_for_tokens as exchange_x_code_for_tokens,
+    generate_pkce_pair,
+    new_state as new_x_state,
+    post_tweet,
+)
 
 app = FastAPI()
 configure_app(app, logger)
@@ -242,6 +250,53 @@ def submit_tweet(payload: TweetRequest, request: Request) -> dict:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     logger.info("tweet posted id=%s", tweet.get("id"))
     return {"status": "ok", "tweet": tweet}
+
+
+@app.get("/api/x/authorize")
+def x_authorize(request: Request):
+    """One-time setup: start X's OAuth2 flow to connect the posting account.
+    See worcadian_agent/twitter.py's module docstring."""
+    email = request.session.get("user_email")
+    if not email or not is_email_allowed(email):
+        raise HTTPException(status_code=401, detail="Not authenticated. Please log in.")
+
+    state = new_x_state()
+    code_verifier, code_challenge = generate_pkce_pair()
+    request.session["x_oauth_state"] = state
+    request.session["x_oauth_code_verifier"] = code_verifier
+    logger.info("x-authorize started by=%s", email)
+    return RedirectResponse(url=build_x_authorize_url(state, code_challenge))
+
+
+@app.get("/api/x/callback")
+def x_callback(request: Request):
+    email = request.session.get("user_email")
+    if not email or not is_email_allowed(email):
+        raise HTTPException(status_code=401, detail="Not authenticated. Please log in.")
+
+    error = request.query_params.get("error")
+    if error:
+        logger.warning("x-callback error=%s", error)
+        return HTMLResponse(f"<p>X authorization failed: {error}</p>", status_code=400)
+
+    code = request.query_params.get("code")
+    state = request.query_params.get("state")
+    expected_state = request.session.pop("x_oauth_state", None)
+    code_verifier = request.session.pop("x_oauth_code_verifier", None)
+    if not code or not state or not expected_state or state != expected_state or not code_verifier:
+        logger.warning("x-callback: missing or mismatched state (possible CSRF or expired attempt)")
+        return HTMLResponse(
+            "<p>X authorization failed: invalid or expired attempt. Please try again.</p>", status_code=400
+        )
+
+    try:
+        exchange_x_code_for_tokens(code, code_verifier)
+    except Exception:
+        logger.exception("x-callback: token exchange failed")
+        return HTMLResponse("<p>X authorization failed during token exchange.</p>", status_code=400)
+
+    logger.info("x-callback: authorization succeeded by=%s", email)
+    return HTMLResponse("<p>X account connected. You can close this tab and return to the dashboard.</p>")
 
 
 @app.get("/api/cron/daily-tasks")

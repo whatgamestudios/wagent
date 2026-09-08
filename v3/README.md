@@ -182,24 +182,42 @@ code changes here, since this app only ever talks to Auth0's own endpoints.
 ## Configuring X (Twitter) posting
 
 The dashboard's "Submit Tweet to x.com" button (behind a confirmation
-dialog) posts to a single, pre-configured X account via
+dialog) posts to a single, pre-authorized X account via
 `worcadian_agent/twitter.py` — not a per-visitor "log in with X" flow.
-X's tweet-creation endpoint (`POST /2/tweets`) requires user-context auth;
-the simplest way to get that for one fixed account is OAuth 1.0a signed with
-that account's own permanent Access Token, which the X Developer Portal
-issues directly with no further interaction needed.
+It uses OAuth 2.0 Authorization Code flow with PKCE, X's current mechanism
+for user-context posting. Unlike OAuth 1.0a, X doesn't hand out a static,
+permanent credential under OAuth 2.0: connecting the account is a one-time
+browser authorization producing a short-lived (~2 hour) access token kept
+alive by a refresh token — and that refresh token **rotates** (X invalidates
+the old one and issues a new one) every time it's used. Since Vercel
+functions have no persistent memory between requests, that rotating token
+pair is stored in Postgres (Neon) rather than a static env var — see
+`worcadian_agent/token_store.py` — and refreshed automatically whenever it's
+close to expiring (`worcadian_agent/twitter.py`).
 
-1. In the [X Developer Portal](https://developer.x.com/), create a Project
-   and App with **Read and Write** permissions (under the app's **User
-   authentication settings** → **App permissions**).
-2. Under **Keys and tokens**, generate the **Consumer Keys** (API Key / API
-   Key Secret) and, for the account that should post, an **Access Token &
-   Secret**.
-3. Set these env vars: `X_API_KEY`, `X_API_SECRET`, `X_ACCESS_TOKEN`,
-   `X_ACCESS_TOKEN_SECRET`.
+1. In the [X Developer Portal](https://console.x.com/) (or
+   developer.x.com), create a Project and App with **Read and Write**
+   permissions (under the app's **User authentication settings** →
+   **App permissions**), and enable **OAuth 2.0** there.
+2. In the same **User authentication settings**, add
+   `<PUBLIC_BASE_URL>/api/x/callback` as a **Callback URI / Redirect URL**
+   (must match `PUBLIC_BASE_URL` exactly).
+3. Under **Keys and tokens**, copy the **Client ID** and **Client Secret**
+   (an older or renamed portal view may instead label these **API Key** /
+   **API Key Secret** — same credentials, used the same way here).
+4. Set env vars: `X_API_KEY` (Client ID), `X_API_SECRET` (Client Secret),
+   and `DATABASE_URL` (a Neon connection string, e.g.
+   `postgresql://user:password@host/dbname?sslmode=require`).
+5. **One-time setup**, after deploying with the above set: while logged into
+   the dashboard, visit `/api/x/authorize` (there's also a "Connect X
+   account" link next to the Tweet section) and approve access on X. The
+   resulting token pair is stored automatically — nothing further to
+   configure. Redo this only if access is ever revoked or the refresh token
+   expires from months of disuse.
 
-Posting is gated by the same OAuth session as the rest of the dashboard —
-anyone who can reach the button is already an allowlisted, logged-in user.
+Posting (and the one-time `/api/x/authorize` step) is gated by the same
+OAuth session as the rest of the dashboard — anyone who can reach it is
+already an allowlisted, logged-in user.
 
 ## Configuring the time of day `daily_tasks` runs
 
@@ -263,8 +281,7 @@ vercel env add ALLOWED_EMAILS
 vercel env add SESSION_SECRET_KEY
 vercel env add X_API_KEY
 vercel env add X_API_SECRET
-vercel env add X_ACCESS_TOKEN
-vercel env add X_ACCESS_TOKEN_SECRET
+vercel env add DATABASE_URL
 vercel deploy --prod
 ```
 
@@ -300,9 +317,15 @@ Project Settings → Environment Variables.
   `worcadian_agent/image_card.py`. Used by each "Generate Card" button and
   the palette swatch buttons on the dashboard — nothing is persisted to disk.
 - `POST /api/tweet` — requires a valid session. Body `{"text": "..."}`;
-  posts it to X via `worcadian_agent/twitter.py` (X API v2, OAuth 1.0a) and
-  returns `{"status": "ok", "tweet": {"id": ..., "text": ...}}`. Used by the
-  "Yes Tweet" confirmation button on the dashboard.
+  posts it to X via `worcadian_agent/twitter.py` (X API v2, OAuth 2.0 +
+  PKCE) and returns `{"status": "ok", "tweet": {"id": ..., "text": ...}}`.
+  Used by the "Yes Tweet" confirmation button on the dashboard. Fails with a
+  clear error if `/api/x/authorize` hasn't been completed yet.
+- `GET /api/x/authorize` — requires a valid session. One-time setup: starts
+  X's OAuth2 authorization flow (see **Configuring X (Twitter) posting**).
+- `GET /api/x/callback` — requires a valid session. X redirects back here
+  with the auth code; exchanges it for an access/refresh token pair and
+  persists it (see `worcadian_agent/token_store.py`).
 - `GET /api/cron/daily-tasks` — builds the press release for the current game
   day, looks up its words, and emails everything to `EMAIL_RECIPIENTS`. This
   is what the Vercel Cron Job calls; protected by the `CRON_SECRET` bearer
@@ -331,12 +354,13 @@ that regenerate the *currently shown* card in that palette (they act on
 whatever word/definition produced the card last, not a fixed word). Clicking
 a "Tweet" button fills the **Tweet** section at the bottom with
 `Worcadian word of the day <WORD>: <definition>`, entirely client-side — no
-request is made yet. That section's editable text box has its own
-**Submit Tweet to x.com** button, which opens a confirmation dialog ("Tweet:
-&lt;contents&gt;" with **Yes Tweet** / **Cancel**) before calling
-`POST /api/tweet` — nothing is posted to X until that dialog is confirmed.
-If the session has expired, any of these actions redirects to `/auth/login`
-instead of showing an error.
+request is made yet. That section has a "Connect X account" link (the
+one-time `/api/x/authorize` setup — see **Configuring X (Twitter)
+posting**) and, below the editable text box, a **Submit Tweet to x.com**
+button, which opens a confirmation dialog ("Tweet: &lt;contents&gt;" with
+**Yes Tweet** / **Cancel**) before calling `POST /api/tweet` — nothing is
+posted to X until that dialog is confirmed. If the session has expired, any
+of these actions redirects to `/auth/login` instead of showing an error.
 
 The favicon (both pages) is the Worcadian logo, loaded directly from
 `https://whatgamestudios.com/worcadian/worcadian-logo.png`.
