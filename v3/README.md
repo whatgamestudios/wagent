@@ -179,6 +179,28 @@ as "social connections" if you want those sign-in options — that's
 configured entirely on Auth0's side (Authentication → Social) and needs no
 code changes here, since this app only ever talks to Auth0's own endpoints.
 
+## Configuring X (Twitter) posting
+
+The dashboard's "Submit Tweet to x.com" button (behind a confirmation
+dialog) posts to a single, pre-configured X account via
+`worcadian_agent/twitter.py` — not a per-visitor "log in with X" flow.
+X's tweet-creation endpoint (`POST /2/tweets`) requires user-context auth;
+the simplest way to get that for one fixed account is OAuth 1.0a signed with
+that account's own permanent Access Token, which the X Developer Portal
+issues directly with no further interaction needed.
+
+1. In the [X Developer Portal](https://developer.x.com/), create a Project
+   and App with **Read and Write** permissions (under the app's **User
+   authentication settings** → **App permissions**).
+2. Under **Keys and tokens**, generate the **Consumer Keys** (API Key / API
+   Key Secret) and, for the account that should post, an **Access Token &
+   Secret**.
+3. Set these env vars: `X_API_KEY`, `X_API_SECRET`, `X_ACCESS_TOKEN`,
+   `X_ACCESS_TOKEN_SECRET`.
+
+Posting is gated by the same OAuth session as the rest of the dashboard —
+anyone who can reach the button is already an allowlisted, logged-in user.
+
 ## Configuring the time of day `daily_tasks` runs
 
 `daily_tasks` is triggered by the Vercel Cron Job defined in `vercel.json`:
@@ -239,6 +261,10 @@ vercel env add AUTH0_CLIENT_SECRET
 vercel env add PUBLIC_BASE_URL
 vercel env add ALLOWED_EMAILS
 vercel env add SESSION_SECRET_KEY
+vercel env add X_API_KEY
+vercel env add X_API_SECRET
+vercel env add X_ACCESS_TOKEN
+vercel env add X_ACCESS_TOKEN_SECRET
 vercel deploy --prod
 ```
 
@@ -273,6 +299,10 @@ Project Settings → Environment Variables.
   `{"card_image": "data:image/png;base64,..."}`, rendered on demand by
   `worcadian_agent/image_card.py`. Used by each "Generate Card" button and
   the palette swatch buttons on the dashboard — nothing is persisted to disk.
+- `POST /api/tweet` — requires a valid session. Body `{"text": "..."}`;
+  posts it to X via `worcadian_agent/twitter.py` (X API v2, OAuth 1.0a) and
+  returns `{"status": "ok", "tweet": {"id": ..., "text": ...}}`. Used by the
+  "Yes Tweet" confirmation button on the dashboard.
 - `GET /api/cron/daily-tasks` — builds the press release for the current game
   day, looks up its words, and emails everything to `EMAIL_RECIPIENTS`. This
   is what the Vercel Cron Job calls; protected by the `CRON_SECRET` bearer
@@ -301,9 +331,12 @@ that regenerate the *currently shown* card in that palette (they act on
 whatever word/definition produced the card last, not a fixed word). Clicking
 a "Tweet" button fills the **Tweet** section at the bottom with
 `Worcadian word of the day <WORD>: <definition>`, entirely client-side — no
-request is made and nothing is actually posted to Twitter/X. If the session
-has expired, any card-generating action redirects to `/auth/login` instead
-of showing an error.
+request is made yet. That section's editable text box has its own
+**Submit Tweet to x.com** button, which opens a confirmation dialog ("Tweet:
+&lt;contents&gt;" with **Yes Tweet** / **Cancel**) before calling
+`POST /api/tweet` — nothing is posted to X until that dialog is confirmed.
+If the session has expired, any of these actions redirects to `/auth/login`
+instead of showing an error.
 
 The favicon (both pages) is the Worcadian logo, loaded directly from
 `https://whatgamestudios.com/worcadian/worcadian-logo.png`.

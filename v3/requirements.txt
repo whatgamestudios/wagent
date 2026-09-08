@@ -2,6 +2,7 @@ fastapi
 uvicorn
 itsdangerous
 requests
+requests-oauthlib
 Pillow
 google-genai
 resend

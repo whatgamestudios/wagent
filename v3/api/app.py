@@ -25,6 +25,7 @@ Routes:
     GET  /dashboard             the OAuth-gated dashboard (dashboard.html)
     POST /api/press-release     build a press release on demand; requires a session
     POST /api/word-card         render a word card for one word on demand; requires a session
+    POST /api/tweet             post a tweet to X via its API; requires a session
     GET  /api/cron/daily-tasks  the scheduled daily_tasks job; protected by
                                  CRON_SECRET (not OAuth -- it's machine-triggered)
 
@@ -68,6 +69,7 @@ from worcadian_agent.oauth import (  # noqa: E402
     is_email_allowed,
     new_state,
 )
+from worcadian_agent.twitter import post_tweet  # noqa: E402
 
 app = FastAPI()
 configure_app(app, logger)
@@ -215,6 +217,31 @@ def generate_word_card_endpoint(payload: WordCardRequest, request: Request) -> d
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     data_url = f"data:image/png;base64,{base64.b64encode(png_bytes).decode('ascii')}"
     return {"card_image": data_url}
+
+
+class TweetRequest(BaseModel):
+    text: str
+
+
+@app.post("/api/tweet")
+def submit_tweet(payload: TweetRequest, request: Request) -> dict:
+    email = request.session.get("user_email")
+    if not email or not is_email_allowed(email):
+        logger.warning("tweet rejected: no valid OAuth session")
+        raise HTTPException(status_code=401, detail="Not authenticated. Please log in.")
+
+    text = payload.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Tweet text is empty.")
+
+    logger.info("tweet submit requested by=%s length=%d", email, len(text))
+    try:
+        tweet = post_tweet(text)
+    except Exception as exc:
+        logger.exception("tweet submission failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    logger.info("tweet posted id=%s", tweet.get("id"))
+    return {"status": "ok", "tweet": tweet}
 
 
 @app.get("/api/cron/daily-tasks")

@@ -171,6 +171,38 @@
       border: 2px solid var(--border);
       border-radius: 50%;
     }
+    .secondary-button {
+      background: var(--bg);
+      color: var(--ink);
+    }
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+      z-index: 100;
+    }
+    .modal {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1.5rem;
+      max-width: 480px;
+      width: 100%;
+    }
+    .modal p {
+      margin: 0 0 1.25rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .modal-buttons {
+      display: flex;
+      gap: 0.75rem;
+      justify-content: flex-end;
+    }
   </style>
 </head>
 <body>
@@ -225,9 +257,20 @@
       </div>
 
       <label style="margin-top: 1.25rem;">Tweet</label>
-      <textarea id="tweet-text" style="min-height: 90px;" placeholder="A candidate tweet will appear here."></textarea>
+      <textarea id="tweet-text" style="min-height: 90px; margin-bottom: 0.75rem;" placeholder="A candidate tweet will appear here."></textarea>
+      <button id="submit-tweet-button" type="button">Submit Tweet to x.com</button>
     </div>
   </main>
+
+  <div id="tweet-modal-overlay" class="modal-overlay" style="display: none;">
+    <div class="modal">
+      <p id="tweet-modal-text"></p>
+      <div class="modal-buttons">
+        <button id="tweet-modal-cancel" type="button" class="secondary-button">Cancel</button>
+        <button id="tweet-modal-confirm" type="button">Yes Tweet</button>
+      </div>
+    </div>
+  </div>
 
   <script>
     const runButton = document.getElementById("run-button");
@@ -244,6 +287,11 @@
     const freeEntryTweetButton = document.getElementById("free-entry-tweet-button");
     const paletteContainer = document.getElementById("palette-buttons");
     const tweetText = document.getElementById("tweet-text");
+    const submitTweetButton = document.getElementById("submit-tweet-button");
+    const tweetModalOverlay = document.getElementById("tweet-modal-overlay");
+    const tweetModalText = document.getElementById("tweet-modal-text");
+    const tweetModalConfirm = document.getElementById("tweet-modal-confirm");
+    const tweetModalCancel = document.getElementById("tweet-modal-cancel");
 
     // Matches worcadian_agent/image_card.py's PALETTES -- the color shown on
     // each swatch is that palette's "accent" color.
@@ -316,6 +364,49 @@
       tweetText.value = buildTweetText(word, definition);
       tweetText.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }
+
+    submitTweetButton.addEventListener("click", () => {
+      const text = tweetText.value.trim();
+      if (!text) {
+        status.textContent = "Nothing to tweet yet.";
+        return;
+      }
+      tweetModalText.textContent = `Tweet: ${text}`;
+      tweetModalOverlay.style.display = "flex";
+    });
+
+    tweetModalCancel.addEventListener("click", () => {
+      tweetModalOverlay.style.display = "none";
+    });
+
+    tweetModalConfirm.addEventListener("click", async () => {
+      const text = tweetText.value.trim();
+      const originalLabel = tweetModalConfirm.textContent;
+      tweetModalConfirm.disabled = true;
+      tweetModalConfirm.textContent = "Tweeting...";
+      try {
+        const response = await fetch("/api/tweet", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text }),
+        });
+        if (response.status === 401) {
+          window.location.href = "/auth/login";
+          return;
+        }
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.detail || `Request failed with status ${response.status}`);
+        }
+        tweetModalOverlay.style.display = "none";
+        status.textContent = "Tweet posted.";
+      } catch (err) {
+        status.textContent = `Error posting tweet: ${err.message}`;
+      } finally {
+        tweetModalConfirm.disabled = false;
+        tweetModalConfirm.textContent = originalLabel;
+      }
+    });
 
     function renderPaletteButtons() {
       paletteContainer.innerHTML = "";
@@ -420,6 +511,7 @@
       wordCard.src = "";
       currentCardEntry = null;
       tweetText.value = "";
+      tweetModalOverlay.style.display = "none";
 
       try {
         const response = await fetch("/api/press-release", {
