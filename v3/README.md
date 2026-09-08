@@ -231,6 +231,48 @@ Posting (and the one-time `/api/x/authorize` step) is gated by the same
 OAuth session as the rest of the dashboard — anyone who can reach it is
 already an allowlisted, logged-in user.
 
+## Configuring Instagram posting
+
+The dashboard's "Submit Image to Instagram" button (behind a confirmation
+dialog) posts a word card image to a single, pre-authorized Instagram
+account via `worcadian_agent/instagram.py`, using **Instagram API with
+Instagram Login** — Meta's standalone product that authenticates directly
+against an Instagram professional (Business/Creator) account, with no
+Facebook Page required.
+
+Instagram's API requires a **public, fetchable `image_url`** — it won't
+accept uploaded bytes directly. Since word cards only ever exist as in-memory
+PNG bytes (rendered on demand, never written to disk), submitting one first
+stores it in the same Neon Postgres database used for tokens (see
+`worcadian_agent/image_store.py`) and serves it back at a public, UUID-keyed
+URL (`GET /api/images/{id}`, deliberately unauthenticated — Instagram's own
+servers fetch it directly and can't send our session cookie) for Instagram
+to fetch.
+
+1. In the [Meta Developer Portal](https://developers.facebook.com/), create
+   an App and add the **Instagram** product, configured for **Instagram API
+   with Instagram Login**.
+2. In that product's settings, add
+   `<PUBLIC_BASE_URL>/api/instagram/callback` as a valid **OAuth redirect
+   URI** (must match `PUBLIC_BASE_URL` exactly).
+3. Copy the **Instagram App ID** and **Instagram App Secret**.
+4. Set env vars: `INSTAGRAM_APP_ID`, `INSTAGRAM_APP_SECRET`. `DATABASE_URL`
+   is shared with the X integration above — no separate database needed.
+5. **One-time setup**, after deploying with the above set: while logged into
+   the dashboard, visit `/api/instagram/authorize` (there's also a "Connect
+   Instagram account" link next to the Word Card section) and approve
+   access. The resulting token is stored automatically.
+
+Unlike X's refresh token (which rotates and is invalidated on every use),
+Instagram's long-lived access token (~60 days) is refreshed "in place" — the
+same token string gets a new expiry each time — so `post_image()` refreshes
+it automatically whenever it's within a week of expiring, with no separate
+refresh token to track. Redo the one-time setup only if access is revoked,
+or the token expires from ~60 days of disuse without ever being refreshed.
+
+Posting (and the one-time `/api/instagram/authorize` step) is gated by the
+same OAuth session as the rest of the dashboard.
+
 ## Configuring the time of day `daily_tasks` runs
 
 `daily_tasks` is triggered by the Vercel Cron Job defined in `vercel.json`:
@@ -294,6 +336,8 @@ vercel env add SESSION_SECRET_KEY
 vercel env add X_API_KEY
 vercel env add X_API_SECRET
 vercel env add DATABASE_URL
+vercel env add INSTAGRAM_APP_ID
+vercel env add INSTAGRAM_APP_SECRET
 vercel deploy --prod
 ```
 
@@ -338,6 +382,21 @@ Project Settings → Environment Variables.
 - `GET /api/x/callback` — requires a valid session. X redirects back here
   with the auth code; exchanges it for an access/refresh token pair and
   persists it (see `worcadian_agent/token_store.py`).
+- `POST /api/instagram-post` — requires a valid session. Body
+  `{"image_data_url": "data:image/png;base64,...", "caption": "..."}`;
+  stores the decoded image (see `worcadian_agent/image_store.py`), posts it
+  to Instagram via `worcadian_agent/instagram.py`, and returns
+  `{"status": "ok", "post": {"id": ...}}`. Used by the "Submit" confirmation
+  button on the dashboard. Fails with a clear error if
+  `/api/instagram/authorize` hasn't been completed yet.
+- `GET /api/instagram/authorize` — requires a valid session. One-time setup:
+  starts Instagram's OAuth flow (see **Configuring Instagram posting**).
+- `GET /api/instagram/callback` — requires a valid session. Instagram
+  redirects back here with the auth code; exchanges it for a long-lived
+  access token and persists it.
+- `GET /api/images/{image_id}` — **public, no session required** (Instagram's
+  servers fetch this URL directly). Serves a temporarily-hosted image by its
+  UUID; 404 for an unknown or malformed id.
 - `GET /api/cron/daily-tasks` — builds the press release for the current game
   day, looks up its words, and emails everything to `EMAIL_RECIPIENTS`. This
   is what the Vercel Cron Job calls; protected by the `CRON_SECRET` bearer
@@ -363,8 +422,14 @@ Card" button calls `POST /api/word-card` for just that word and displays the
 result in the **Word Card** section below, alongside a dozen color-swatch
 buttons — one per palette in `worcadian_agent/image_card.py`'s `PALETTES` —
 that regenerate the *currently shown* card in that palette (they act on
-whatever word/definition produced the card last, not a fixed word). Clicking
-a "Tweet" button fills the **Tweet** section at the bottom with
+whatever word/definition produced the card last, not a fixed word). That
+section also has a "Connect Instagram account" link (the one-time
+`/api/instagram/authorize` setup — see **Configuring Instagram posting**)
+and a **Submit Image to Instagram** button, which opens a confirmation
+dialog ("Submit Word Card to Instagram" with **Submit** / **Cancel**) before
+calling `POST /api/instagram-post` with the currently-shown card image —
+nothing is posted until that dialog is confirmed. Clicking a "Tweet" button
+fills the **Tweet** section at the bottom with
 `Worcadian word of the day <WORD>: <definition>`, entirely client-side — no
 request is made yet. That section has a "Connect X account" link (the
 one-time `/api/x/authorize` setup — see **Configuring X (Twitter)

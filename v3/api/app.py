@@ -28,6 +28,11 @@ Routes:
     POST /api/tweet             post a tweet to X via its API; requires a session
     GET  /api/x/authorize       one-time: starts X's OAuth2 authorization flow; requires a session
     GET  /api/x/callback        X redirects back here with the auth code; requires a session
+    POST /api/instagram-post    post the current word card image to Instagram; requires a session
+    GET  /api/instagram/authorize  one-time: starts Instagram's OAuth flow; requires a session
+    GET  /api/instagram/callback   Instagram redirects back here; requires a session
+    GET  /api/images/{image_id}    serves a temporarily-hosted image; PUBLIC,
+                                 no session -- Instagram's own servers fetch it
     GET  /api/cron/daily-tasks  the scheduled daily_tasks job; protected by
                                  CRON_SECRET (not OAuth -- it's machine-triggered)
 
@@ -54,7 +59,7 @@ logger = logging.getLogger("worcadian_agent.api")
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from pydantic import BaseModel
 
 load_dotenv()
@@ -64,6 +69,13 @@ from worcadian_agent.app_setup import configure_app  # noqa: E402
 from worcadian_agent.daily_tasks import daily_tasks  # noqa: E402
 from worcadian_agent.dictionary_client import lookup_words  # noqa: E402
 from worcadian_agent.image_card import generate_word_card_bytes  # noqa: E402
+from worcadian_agent.image_store import load_image, save_image  # noqa: E402
+from worcadian_agent.instagram import (  # noqa: E402
+    build_authorize_url as build_instagram_authorize_url,
+    exchange_code_for_tokens as exchange_instagram_code_for_tokens,
+    new_state as new_instagram_state,
+    post_image as post_instagram_image,
+)
 from worcadian_agent.oauth import (  # noqa: E402
     build_authorize_url,
     build_logout_url,
@@ -297,6 +309,98 @@ def x_callback(request: Request):
 
     logger.info("x-callback: authorization succeeded by=%s", email)
     return HTMLResponse("<p>X account connected. You can close this tab and return to the dashboard.</p>")
+
+
+class InstagramPostRequest(BaseModel):
+    image_data_url: str
+    caption: str = ""
+
+
+@app.post("/api/instagram-post")
+def submit_instagram_post(payload: InstagramPostRequest, request: Request) -> dict:
+    email = request.session.get("user_email")
+    if not email or not is_email_allowed(email):
+        logger.warning("instagram-post rejected: no valid OAuth session")
+        raise HTTPException(status_code=401, detail="Not authenticated. Please log in.")
+
+    try:
+        _, encoded = payload.image_data_url.split(",", 1)
+        image_bytes = base64.b64decode(encoded)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid image data.")
+
+    logger.info("instagram-post requested by=%s caption_len=%d", email, len(payload.caption))
+    try:
+        image_id = save_image(image_bytes, "image/png")
+        base_url = os.environ["PUBLIC_BASE_URL"].rstrip("/")
+        image_url = f"{base_url}/api/images/{image_id}"
+        post = post_instagram_image(image_url, payload.caption)
+    except Exception as exc:
+        logger.exception("instagram post failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    logger.info("instagram post published id=%s", post.get("id"))
+    return {"status": "ok", "post": post}
+
+
+@app.get("/api/instagram/authorize")
+def instagram_authorize(request: Request):
+    """One-time setup: start Instagram's OAuth flow to connect the posting account.
+    See worcadian_agent/instagram.py's module docstring."""
+    email = request.session.get("user_email")
+    if not email or not is_email_allowed(email):
+        raise HTTPException(status_code=401, detail="Not authenticated. Please log in.")
+
+    state = new_instagram_state()
+    request.session["instagram_oauth_state"] = state
+    logger.info("instagram-authorize started by=%s", email)
+    return RedirectResponse(url=build_instagram_authorize_url(state))
+
+
+@app.get("/api/instagram/callback")
+def instagram_callback(request: Request):
+    email = request.session.get("user_email")
+    if not email or not is_email_allowed(email):
+        raise HTTPException(status_code=401, detail="Not authenticated. Please log in.")
+
+    error = request.query_params.get("error")
+    if error:
+        logger.warning("instagram-callback error=%s", error)
+        return HTMLResponse(f"<p>Instagram authorization failed: {error}</p>", status_code=400)
+
+    code = request.query_params.get("code")
+    state = request.query_params.get("state")
+    expected_state = request.session.pop("instagram_oauth_state", None)
+    if not code or not state or not expected_state or state != expected_state:
+        logger.warning("instagram-callback: missing or mismatched state (possible CSRF or expired attempt)")
+        return HTMLResponse(
+            "<p>Instagram authorization failed: invalid or expired attempt. Please try again.</p>", status_code=400
+        )
+
+    try:
+        exchange_instagram_code_for_tokens(code)
+    except Exception:
+        logger.exception("instagram-callback: token exchange failed")
+        return HTMLResponse("<p>Instagram authorization failed during token exchange.</p>", status_code=400)
+
+    logger.info("instagram-callback: authorization succeeded by=%s", email)
+    return HTMLResponse("<p>Instagram account connected. You can close this tab and return to the dashboard.</p>")
+
+
+@app.get("/api/images/{image_id}")
+def serve_hosted_image(image_id: str):
+    """Serves a temporarily-hosted image. Deliberately PUBLIC (no session
+    check) -- Instagram's own servers fetch this URL directly and can't send
+    our session cookie. Malformed/unknown ids are treated alike as 404,
+    without leaking whether the id was invalid or simply not found."""
+    try:
+        result = load_image(image_id)
+    except Exception:
+        logger.exception("serve_hosted_image: lookup failed for image_id=%s", image_id)
+        result = None
+    if result is None:
+        raise HTTPException(status_code=404, detail="Image not found.")
+    content, content_type = result
+    return Response(content=content, media_type=content_type)
 
 
 @app.get("/api/cron/daily-tasks")

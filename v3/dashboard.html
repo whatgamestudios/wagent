@@ -249,11 +249,15 @@
       </div>
 
       <div id="card-section" style="display: none; margin-top: 1.25rem;">
-        <label for="word-card">Word Card</label>
+        <label>
+          Word Card ·
+          <a href="/api/instagram/authorize" style="color: var(--accent);">Connect Instagram account</a>
+        </label>
         <div class="card-row">
           <img id="word-card" alt="Word card" />
           <div id="palette-buttons" class="palette-buttons"></div>
         </div>
+        <button id="submit-instagram-button" type="button" style="margin-top: 0.75rem;">Submit Image to Instagram</button>
       </div>
 
       <label style="margin-top: 1.25rem;">
@@ -271,6 +275,16 @@
       <div class="modal-buttons">
         <button id="tweet-modal-cancel" type="button" class="secondary-button">Cancel</button>
         <button id="tweet-modal-confirm" type="button">Yes Tweet</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="instagram-modal-overlay" class="modal-overlay" style="display: none;">
+    <div class="modal">
+      <p>Submit Word Card to Instagram</p>
+      <div class="modal-buttons">
+        <button id="instagram-modal-cancel" type="button" class="secondary-button">Cancel</button>
+        <button id="instagram-modal-confirm" type="button">Submit</button>
       </div>
     </div>
   </div>
@@ -295,6 +309,10 @@
     const tweetModalText = document.getElementById("tweet-modal-text");
     const tweetModalConfirm = document.getElementById("tweet-modal-confirm");
     const tweetModalCancel = document.getElementById("tweet-modal-cancel");
+    const submitInstagramButton = document.getElementById("submit-instagram-button");
+    const instagramModalOverlay = document.getElementById("instagram-modal-overlay");
+    const instagramModalConfirm = document.getElementById("instagram-modal-confirm");
+    const instagramModalCancel = document.getElementById("instagram-modal-cancel");
 
     // Matches worcadian_agent/image_card.py's PALETTES -- the color shown on
     // each swatch is that palette's "accent" color.
@@ -411,6 +429,46 @@
       }
     });
 
+    submitInstagramButton.addEventListener("click", () => {
+      if (!wordCard.src) {
+        status.textContent = "Generate a word card first.";
+        return;
+      }
+      instagramModalOverlay.style.display = "flex";
+    });
+
+    instagramModalCancel.addEventListener("click", () => {
+      instagramModalOverlay.style.display = "none";
+    });
+
+    instagramModalConfirm.addEventListener("click", async () => {
+      const originalLabel = instagramModalConfirm.textContent;
+      instagramModalConfirm.disabled = true;
+      instagramModalConfirm.textContent = "Submitting...";
+      try {
+        const response = await fetch("/api/instagram-post", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ image_data_url: wordCard.src, caption: "" }),
+        });
+        if (response.status === 401) {
+          window.location.href = "/auth/login";
+          return;
+        }
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.detail || `Request failed with status ${response.status}`);
+        }
+        instagramModalOverlay.style.display = "none";
+        status.textContent = "Posted to Instagram.";
+      } catch (err) {
+        status.textContent = `Error posting to Instagram: ${err.message}`;
+      } finally {
+        instagramModalConfirm.disabled = false;
+        instagramModalConfirm.textContent = originalLabel;
+      }
+    });
+
     function renderPaletteButtons() {
       paletteContainer.innerHTML = "";
       for (const p of PALETTES) {
@@ -515,6 +573,7 @@
       currentCardEntry = null;
       tweetText.value = "";
       tweetModalOverlay.style.display = "none";
+      instagramModalOverlay.style.display = "none";
 
       try {
         const response = await fetch("/api/press-release", {

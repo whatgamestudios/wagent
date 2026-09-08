@@ -105,7 +105,7 @@ def _save_token_payload(payload: dict) -> str:
     access_token = payload["access_token"]
     refresh_token = payload["refresh_token"]
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=payload["expires_in"])
-    token_store.save_tokens(access_token, refresh_token, expires_at)
+    token_store.save_x_tokens(access_token, refresh_token, expires_at)
     return access_token
 
 
@@ -134,7 +134,7 @@ def refresh_access_token(refresh_token: str) -> str:
 
 
 def _get_valid_access_token() -> str:
-    tokens = token_store.load_tokens()
+    tokens = token_store.load_x_tokens()
     if tokens is None:
         raise RuntimeError(
             "X is not connected yet. Visit /api/x/authorize (while logged in) to authorize this app once."
@@ -164,7 +164,7 @@ def post_tweet(text: str) -> dict:
         # the token was revoked, or clock skew) -- force one refresh and
         # retry before giving up.
         logger.warning("tweet post got 401 with a token believed valid; forcing a refresh and retrying once")
-        tokens = token_store.load_tokens()
+        tokens = token_store.load_x_tokens()
         if tokens is None:
             raise RuntimeError("X is not connected. Visit /api/x/authorize (while logged in) to authorize this app.")
         access_token = refresh_access_token(tokens["refresh_token"])
