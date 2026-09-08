@@ -173,6 +173,21 @@
       <label style="margin-top: 1.25rem;">Words Used</label>
       <div id="words-used" class="definitions"></div>
 
+      <label style="margin-top: 1.25rem;">Free Entry</label>
+      <div class="controls">
+        <div class="field">
+          <label for="free-word">Word</label>
+          <input id="free-word" type="text" placeholder="e.g. ZYTHUM" />
+        </div>
+        <div class="field">
+          <label for="free-pos">Type of word</label>
+          <input id="free-pos" type="text" placeholder="e.g. noun" />
+        </div>
+      </div>
+      <label for="free-definition">Definition</label>
+      <textarea id="free-definition" style="min-height: 90px; margin-bottom: 0.75rem;" placeholder="Enter a definition"></textarea>
+      <button id="free-entry-button" type="button">Generate Card</button>
+
       <div id="card-section" style="display: none; margin-top: 1.25rem;">
         <label for="word-card">Word Card</label>
         <img id="word-card" alt="Word card" />
@@ -188,6 +203,10 @@
     const wordsUsedContainer = document.getElementById("words-used");
     const cardSection = document.getElementById("card-section");
     const wordCard = document.getElementById("word-card");
+    const freeWordInput = document.getElementById("free-word");
+    const freePosInput = document.getElementById("free-pos");
+    const freeDefinitionInput = document.getElementById("free-definition");
+    const freeEntryButton = document.getElementById("free-entry-button");
 
     async function generateCard(word, entry, button) {
       const originalLabel = button.textContent;
@@ -221,6 +240,16 @@
         button.textContent = originalLabel;
       }
     }
+
+    freeEntryButton.addEventListener("click", () => {
+      const word = freeWordInput.value.trim();
+      const definition = freeDefinitionInput.value.trim();
+      if (!word || !definition) {
+        status.textContent = "Enter both a word and a definition first.";
+        return;
+      }
+      generateCard(word, { part_of_speech: freePosInput.value.trim() || null, definition }, freeEntryButton);
+    });
 
     function makeWordBox(word, entry) {
       const wrapper = document.createElement("div");
