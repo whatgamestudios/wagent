@@ -222,7 +222,7 @@
       }
     }
 
-    function makeWordBox(word, entry, withCardButton) {
+    function makeWordBox(word, entry) {
       const wrapper = document.createElement("div");
       wrapper.className = "definition-box";
 
@@ -233,14 +233,12 @@
       label.textContent = entry.part_of_speech ? `${word} (${entry.part_of_speech})` : word;
       row.appendChild(label);
 
-      if (withCardButton) {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "card-button";
-        button.textContent = "Generate Card";
-        button.addEventListener("click", () => generateCard(word, entry, button));
-        row.appendChild(button);
-      }
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "card-button";
+      button.textContent = "Generate Card";
+      button.addEventListener("click", () => generateCard(word, entry, button));
+      row.appendChild(button);
 
       const box = document.createElement("textarea");
       box.readOnly = true;
@@ -258,11 +256,8 @@
       seedWordContainer.innerHTML = "";
       wordsUsedContainer.innerHTML = "";
       for (const [word, entry] of Object.entries(definitions || {})) {
-        if (word === seedWord) {
-          seedWordContainer.appendChild(makeWordBox(word, entry, false));
-        } else {
-          wordsUsedContainer.appendChild(makeWordBox(word, entry, true));
-        }
+        const container = word === seedWord ? seedWordContainer : wordsUsedContainer;
+        container.appendChild(makeWordBox(word, entry));
       }
     }
 
