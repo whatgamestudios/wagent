@@ -122,10 +122,23 @@
     .definition-box textarea {
       min-height: 90px;
     }
-    .definition-box label {
+    .word-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      margin-bottom: 0.4rem;
+    }
+    .word-row label {
       text-transform: uppercase;
       letter-spacing: 0.03em;
       font-size: 0.9rem;
+      margin-bottom: 0;
+    }
+    .card-button {
+      padding: 0.3rem 0.7rem;
+      font-size: 0.85rem;
+      flex-shrink: 0;
     }
     #word-card {
       max-width: 100%;
@@ -154,13 +167,13 @@
 
       <div id="status" class="status"></div>
 
-      <label for="output">Output</label>
-      <textarea id="output" readonly placeholder="The press release will appear here."></textarea>
+      <label>Seed Word</label>
+      <div id="seed-word" class="definitions"></div>
 
-      <label style="margin-top: 1.25rem;">Word Definitions</label>
-      <div id="definitions" class="definitions"></div>
+      <label style="margin-top: 1.25rem;">Words Used</label>
+      <div id="words-used" class="definitions"></div>
 
-      <div id="card-section" style="display: none;">
+      <div id="card-section" style="display: none; margin-top: 1.25rem;">
         <label for="word-card">Word Card</label>
         <img id="word-card" alt="Word card" />
       </div>
@@ -170,36 +183,86 @@
   <script>
     const runButton = document.getElementById("run-button");
     const dayInput = document.getElementById("game-day");
-    const output = document.getElementById("output");
     const status = document.getElementById("status");
-    const definitionsContainer = document.getElementById("definitions");
+    const seedWordContainer = document.getElementById("seed-word");
+    const wordsUsedContainer = document.getElementById("words-used");
     const cardSection = document.getElementById("card-section");
     const wordCard = document.getElementById("word-card");
 
-    function renderDefinitions(definitions) {
-      definitionsContainer.innerHTML = "";
-      const words = Object.keys(definitions || {});
-      if (words.length === 0) {
-        return;
+    async function generateCard(word, entry, button) {
+      const originalLabel = button.textContent;
+      button.disabled = true;
+      button.textContent = "Generating...";
+      try {
+        const response = await fetch("/api/word-card", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            word,
+            part_of_speech: entry.part_of_speech,
+            definition: entry.definition || entry.short_definition,
+          }),
+        });
+        if (response.status === 401) {
+          window.location.href = "/auth/login";
+          return;
+        }
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.detail || `Request failed with status ${response.status}`);
+        }
+        wordCard.src = data.card_image;
+        cardSection.style.display = "block";
+        cardSection.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      } catch (err) {
+        status.textContent = `Error generating card: ${err.message}`;
+      } finally {
+        button.disabled = false;
+        button.textContent = originalLabel;
       }
-      for (const word of words) {
-        const entry = definitions[word];
-        const wrapper = document.createElement("div");
-        wrapper.className = "definition-box";
+    }
 
-        const label = document.createElement("label");
-        label.textContent = entry.part_of_speech ? `${word} (${entry.part_of_speech})` : word;
+    function makeWordBox(word, entry, withCardButton) {
+      const wrapper = document.createElement("div");
+      wrapper.className = "definition-box";
 
-        const box = document.createElement("textarea");
-        box.readOnly = true;
-        const lines = [];
-        if (entry.definition) lines.push(`Definition: ${entry.definition}`);
-        if (entry.short_definition) lines.push(`Short definition: ${entry.short_definition}`);
-        box.value = lines.join("\n\n") || "No definition available.";
+      const row = document.createElement("div");
+      row.className = "word-row";
 
-        wrapper.appendChild(label);
-        wrapper.appendChild(box);
-        definitionsContainer.appendChild(wrapper);
+      const label = document.createElement("label");
+      label.textContent = entry.part_of_speech ? `${word} (${entry.part_of_speech})` : word;
+      row.appendChild(label);
+
+      if (withCardButton) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "card-button";
+        button.textContent = "Generate Card";
+        button.addEventListener("click", () => generateCard(word, entry, button));
+        row.appendChild(button);
+      }
+
+      const box = document.createElement("textarea");
+      box.readOnly = true;
+      const lines = [];
+      if (entry.definition) lines.push(`Definition: ${entry.definition}`);
+      if (entry.short_definition) lines.push(`Short definition: ${entry.short_definition}`);
+      box.value = lines.join("\n\n") || "No definition available.";
+
+      wrapper.appendChild(row);
+      wrapper.appendChild(box);
+      return wrapper;
+    }
+
+    function renderWordSections(seedWord, definitions) {
+      seedWordContainer.innerHTML = "";
+      wordsUsedContainer.innerHTML = "";
+      for (const [word, entry] of Object.entries(definitions || {})) {
+        if (word === seedWord) {
+          seedWordContainer.appendChild(makeWordBox(word, entry, false));
+        } else {
+          wordsUsedContainer.appendChild(makeWordBox(word, entry, true));
+        }
       }
     }
 
@@ -209,8 +272,8 @@
 
       runButton.disabled = true;
       status.textContent = "Generating press release...";
-      output.value = "";
-      definitionsContainer.innerHTML = "";
+      seedWordContainer.innerHTML = "";
+      wordsUsedContainer.innerHTML = "";
       cardSection.style.display = "none";
       wordCard.src = "";
 
@@ -228,12 +291,7 @@
         if (!response.ok) {
           throw new Error(data.detail || `Request failed with status ${response.status}`);
         }
-        output.value = data.text;
-        renderDefinitions(data.definitions);
-        if (data.card_image) {
-          wordCard.src = data.card_image;
-          cardSection.style.display = "block";
-        }
+        renderWordSections(data.seed_word, data.definitions);
         status.textContent = `Done (game day ${data.game_day ?? "current"}).`;
       } catch (err) {
         status.textContent = `Error: ${err.message}`;

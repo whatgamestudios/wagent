@@ -260,11 +260,16 @@ Project Settings → Environment Variables.
   Auth0's own logout endpoint back to `/`.
 - `POST /api/press-release` — requires a valid session (401 if not logged
   in). Body `{"day": 120}` (or `{"day": null}`/omitted for the current game
-  day). Returns `{"game_day": ..., "text": ..., "definitions": {...}, "card_image": ...}`,
-  where `definitions` maps each looked-up word to
-  `{part_of_speech, definition, short_definition}` and `card_image` is a
-  base64 `data:image/png;...` URI (or `null`). Used by the dashboard's
-  "Execute Daily Tasks" button; does not send email.
+  day). Returns `{"game_day": ..., "seed_word": ..., "text": ..., "definitions": {...}}`,
+  where `definitions` maps each looked-up word (seed word first, then
+  notable words in most-to-least obscure order) to
+  `{part_of_speech, definition, short_definition}`. Used by the dashboard's
+  "Execute Daily Tasks" button; does not send email or generate any word card.
+- `POST /api/word-card` — requires a valid session. Body
+  `{"word": ..., "part_of_speech": ..., "definition": ...}`; returns
+  `{"card_image": "data:image/png;base64,..."}`, rendered on demand by
+  `worcadian_agent/image_card.py`. Used by each "Generate Card" button on the
+  dashboard — nothing is persisted to disk.
 - `GET /api/cron/daily-tasks` — builds the press release for the current game
   day, looks up its words, and emails everything to `EMAIL_RECIPIENTS`. This
   is what the Vercel Cron Job calls; protected by the `CRON_SECRET` bearer
@@ -280,14 +285,13 @@ title "Worcadian Agent" and a "Log in" button that sends the browser to
 in — see **Configuring OAuth login**) has a "Log out" link next to the
 subtitle, a game-day number field (leave blank to use the current game day),
 and an **Execute Daily Tasks** button that calls `POST /api/press-release`
-and displays the generated press release in the output text box, followed by
-one read-only text box per looked-up word showing its part of speech,
-definition, and short definition. Below that, a word card image is shown for
-the *last* looked-up word — rendered on demand by
-`worcadian_agent/image_card.py` (word, part of speech, and definition in,
-PNG bytes out) and returned inline as a base64 `data:` URI in the API
-response, with no file persisted anywhere. If the session has expired, the
-button redirects to `/auth/login` instead of showing an error.
+and populates two sections: **Seed Word** (the day's seed word, its part of
+speech, and a read-only definition box) and **Words Used** (every other
+looked-up word, most-to-least obscure, each with its own definition box and
+a **Generate Card** button). Clicking that button calls `POST /api/word-card`
+for just that word and displays the result in the **Word Card** section
+below. If the session has expired, either action redirects to `/auth/login`
+instead of showing an error.
 
 The favicon (both pages) is the Worcadian logo, loaded directly from
 `https://whatgamestudios.com/worcadian/worcadian-logo.png`.

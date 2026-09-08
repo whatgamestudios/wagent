@@ -24,6 +24,7 @@ Routes:
     GET  /auth/logout           clears the session + Auth0 logout
     GET  /dashboard             the OAuth-gated dashboard (dashboard.html)
     POST /api/press-release     build a press release on demand; requires a session
+    POST /api/word-card         render a word card for one word on demand; requires a session
     GET  /api/cron/daily-tasks  the scheduled daily_tasks job; protected by
                                  CRON_SECRET (not OAuth -- it's machine-triggered)
 
@@ -147,24 +148,6 @@ def dashboard(request: Request):
 # --- Press release (button) + daily_tasks (cron) ----------------------------
 
 
-def _build_word_card_data_url(definitions: dict[str, dict]) -> str | None:
-    """Render a word card for the last word in `definitions` (in lookup order) and
-    return it as a data: URI ready for an <img src>, or None if there's nothing to render."""
-    if not definitions:
-        return None
-    word = next(reversed(definitions))
-    entry = definitions[word]
-    meaning = entry.get("definition") or entry.get("short_definition")
-    if not meaning:
-        return None
-    try:
-        png_bytes = generate_word_card_bytes(word, meaning, part_of_speech=entry.get("part_of_speech"))
-    except Exception:
-        logger.exception("word card generation failed word=%s", word)
-        return None
-    return f"data:image/png;base64,{base64.b64encode(png_bytes).decode('ascii')}"
-
-
 # TEMPORARY: the "Execute Daily Tasks" button skips the LLM press-release
 # generation step (gather_facts/dictionary lookups/word card still run) while
 # that's being worked on separately. Set back to False to re-enable it.
@@ -187,7 +170,6 @@ def generate_press_release(payload: PressReleaseRequest, request: Request) -> di
         facts_bundle = gather_facts(payload.day)
         words_to_look_up = [facts_bundle["seed_word"]] + [w["word"] for w in facts_bundle["notable_words"]]
         definitions = lookup_words(words_to_look_up)
-        card_image = _build_word_card_data_url(definitions)
         if SKIP_PRESS_RELEASE_ON_BUTTON:
             logger.info("press-release generation temporarily disabled; skipping build_press_release")
             text = "(press release generation is temporarily disabled)"
@@ -200,10 +182,36 @@ def generate_press_release(payload: PressReleaseRequest, request: Request) -> di
     logger.info("press-release step done game_day=%s", facts_bundle["game_day"])
     return {
         "game_day": facts_bundle["game_day"],
+        "seed_word": facts_bundle["seed_word"],
         "text": text,
         "definitions": definitions,
-        "card_image": card_image,
     }
+
+
+class WordCardRequest(BaseModel):
+    word: str
+    part_of_speech: str | None = None
+    definition: str | None = None
+
+
+@app.post("/api/word-card")
+def generate_word_card_endpoint(payload: WordCardRequest, request: Request) -> dict:
+    email = request.session.get("user_email")
+    if not email or not is_email_allowed(email):
+        logger.warning("word-card rejected: no valid OAuth session")
+        raise HTTPException(status_code=401, detail="Not authenticated. Please log in.")
+
+    if not payload.definition:
+        raise HTTPException(status_code=400, detail="No definition available for this word.")
+
+    logger.info("word-card requested word=%s by=%s", payload.word, email)
+    try:
+        png_bytes = generate_word_card_bytes(payload.word, payload.definition, part_of_speech=payload.part_of_speech)
+    except Exception as exc:
+        logger.exception("word card generation failed word=%s", payload.word)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    data_url = f"data:image/png;base64,{base64.b64encode(png_bytes).decode('ascii')}"
+    return {"card_image": data_url}
 
 
 @app.get("/api/cron/daily-tasks")
