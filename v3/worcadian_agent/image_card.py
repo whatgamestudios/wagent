@@ -24,6 +24,31 @@ BACKGROUND = (242, 233, 216)  # parchment
 INK = (43, 36, 32)  # near-black brown
 ACCENT = (150, 104, 45)  # aged gold, used for rules/kicker/footer
 
+# Named color palettes selectable per-card (e.g. from the website's palette
+# buttons). Each is {background, ink, accent} -- same three roles as the
+# BACKGROUND/INK/ACCENT constants above, which "parchment" reproduces exactly
+# so it stays the default look.
+PALETTES: dict[str, dict[str, tuple[int, int, int]]] = {
+    "parchment": {"background": BACKGROUND, "ink": INK, "accent": ACCENT},
+    "midnight": {"background": (26, 27, 38), "ink": (230, 230, 240), "accent": (122, 162, 247)},
+    "forest": {"background": (233, 241, 231), "ink": (27, 46, 31), "accent": (58, 125, 68)},
+    "rose": {"background": (250, 235, 238), "ink": (77, 29, 41), "accent": (191, 97, 121)},
+    "ocean": {"background": (224, 242, 247), "ink": (11, 61, 74), "accent": (23, 138, 168)},
+    "sunset": {"background": (255, 239, 219), "ink": (92, 44, 20), "accent": (219, 110, 39)},
+    "lavender": {"background": (240, 234, 250), "ink": (55, 38, 84), "accent": (139, 101, 201)},
+    "slate": {"background": (232, 236, 239), "ink": (33, 42, 49), "accent": (86, 113, 137)},
+    "mustard": {"background": (250, 244, 224), "ink": (61, 49, 15), "accent": (196, 153, 29)},
+    "crimson": {"background": (250, 231, 231), "ink": (74, 17, 17), "accent": (176, 42, 42)},
+    "mint": {"background": (229, 247, 240), "ink": (16, 66, 52), "accent": (45, 151, 116)},
+    "charcoal": {"background": (30, 30, 30), "ink": (230, 230, 230), "accent": (200, 160, 60)},
+}
+DEFAULT_PALETTE = "parchment"
+
+
+def get_palette(name: str | None) -> dict[str, tuple[int, int, int]]:
+    """Look up a named palette, falling back to the default for an unknown/missing name."""
+    return PALETTES.get((name or DEFAULT_PALETTE).strip().lower(), PALETTES[DEFAULT_PALETTE])
+
 # fonts/ ships DejaVu Serif regular/bold/italic (bundled in the repo -- see
 # fonts/LICENSE) as the guaranteed final fallback: a serverless deployment
 # (e.g. Vercel's Python runtime) has NO system fonts at all, so relying only
@@ -186,54 +211,53 @@ def _render_card_image(
     font_dir: str | Path | None = None,
     kicker: str = "WORCADIAN · WORD OF THE DAY",
     footer: str | None = None,
+    background: tuple[int, int, int] = BACKGROUND,
+    ink: tuple[int, int, int] = INK,
+    accent: tuple[int, int, int] = ACCENT,
 ) -> Image.Image:
-    """Render `word` (and optional `part_of_speech`) and `meaning` onto a parchment card."""
-    img = Image.new("RGB", (width, height), BACKGROUND)
+    """Render `word` (and optional `part_of_speech`) and `meaning` onto a card."""
+    img = Image.new("RGB", (width, height), background)
     draw = ImageDraw.Draw(img)
 
     margin = round(width * 0.09)
     inner_margin = margin + round(width * 0.02)
     content_width = width - 2 * inner_margin
 
-    draw.rectangle([margin, margin, width - margin, height - margin], outline=ACCENT, width=3)
+    draw.rectangle([margin, margin, width - margin, height - margin], outline=accent, width=3)
     draw.rectangle(
         [margin + 10, margin + 10, width - margin - 10, height - margin - 10],
-        outline=ACCENT,
+        outline=accent,
         width=1,
     )
 
     y = margin + round(height * 0.07)
 
     kicker_font = _load_font("regular", round(width * 0.024), font_dir)
-    _draw_centered(draw, y, kicker, kicker_font, ACCENT, width, tracking=round(width * 0.006))
+    _draw_centered(draw, y, kicker, kicker_font, accent, width, tracking=round(width * 0.006))
     y += round(height * 0.05)
 
-    draw.line([(width / 2 - 60, y), (width / 2 + 60, y)], fill=ACCENT, width=2)
+    draw.line([(width / 2 - 60, y), (width / 2 + 60, y)], fill=accent, width=2)
     y += round(height * 0.055)
 
     word_text = word.strip().upper()
-#    word_font = _fit_font(
-#        draw, word_text, "bold", content_width, font_dir,
-#        start_size=round(width * 0.5), min_size=round(width * 0.2),
-#    )
     word_font = _fit_font(
         draw, word_text, "bold", content_width, font_dir,
         start_size=round(width * 0.16), min_size=round(width * 0.05),
     )
     word_height = draw.textbbox((0, 0), word_text, font=word_font)[3]
-    _draw_centered(draw, y, word_text, word_font, INK, width)
+    _draw_centered(draw, y, word_text, word_font, ink, width)
     y += word_height + round(height * 0.025)
 
     if part_of_speech:
         pos_text = part_of_speech.strip().lower()
         pos_font = _load_font("italic", round(width * 0.028), font_dir)
         pos_height = draw.textbbox((0, 0), pos_text, font=pos_font)[3]
-        _draw_centered(draw, y, pos_text, pos_font, ACCENT, width)
+        _draw_centered(draw, y, pos_text, pos_font, accent, width)
         y += pos_height + round(height * 0.03)
     else:
         y += round(height * 0.025)
 
-    draw.line([(width / 2 - 40, y), (width / 2 + 40, y)], fill=ACCENT, width=2)
+    draw.line([(width / 2 - 40, y), (width / 2 + 40, y)], fill=accent, width=2)
     y += round(height * 0.055)
 
     footer_text = footer or f"worcadian · {date.today():%B %d, %Y}"
@@ -251,10 +275,10 @@ def _render_card_image(
     block_height = line_height * len(meaning_lines)
     text_y = y + max(0, (available_height - block_height) / 2)
     for line in meaning_lines:
-        _draw_centered(draw, text_y, line, meaning_font, INK, width)
+        _draw_centered(draw, text_y, line, meaning_font, ink, width)
         text_y += line_height
 
-    _draw_centered(draw, footer_y, footer_text, footer_font, ACCENT, width, tracking=round(width * 0.003))
+    _draw_centered(draw, footer_y, footer_text, footer_font, accent, width, tracking=round(width * 0.003))
 
     return img
 
@@ -269,11 +293,17 @@ def generate_word_card(
     font_dir: str | Path | None = None,
     kicker: str = "WORCADIAN · WORD OF THE DAY",
     footer: str | None = None,
+    palette: str | None = None,
 ) -> Path:
-    """Render `word` and `meaning` onto a parchment card and save it as a PNG file."""
+    """Render `word` and `meaning` onto a card and save it as a PNG file.
+
+    `palette` is a name from PALETTES (default "parchment"); unknown names
+    fall back to the default rather than raising.
+    """
+    colors = get_palette(palette)
     img = _render_card_image(
         word, meaning, part_of_speech=part_of_speech, width=width, height=height,
-        font_dir=font_dir, kicker=kicker, footer=footer,
+        font_dir=font_dir, kicker=kicker, footer=footer, **colors,
     )
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -290,13 +320,19 @@ def generate_word_card_bytes(
     font_dir: str | Path | None = None,
     kicker: str = "WORCADIAN · WORD OF THE DAY",
     footer: str | None = None,
+    palette: str | None = None,
 ) -> bytes:
-    """Render `word` and `meaning` onto a parchment card and return it as PNG bytes,
-    without touching disk -- for serverless callers that embed the image directly
-    in an API response (e.g. as a data: URI) rather than persisting a file."""
+    """Render `word` and `meaning` onto a card and return it as PNG bytes, without
+    touching disk -- for serverless callers that embed the image directly in an
+    API response (e.g. as a data: URI) rather than persisting a file.
+
+    `palette` is a name from PALETTES (default "parchment"); unknown names
+    fall back to the default rather than raising.
+    """
+    colors = get_palette(palette)
     img = _render_card_image(
         word, meaning, part_of_speech=part_of_speech, width=width, height=height,
-        font_dir=font_dir, kicker=kicker, footer=footer,
+        font_dir=font_dir, kicker=kicker, footer=footer, **colors,
     )
     buf = io.BytesIO()
     img.save(buf, "PNG")
@@ -318,6 +354,7 @@ def _main() -> None:
     )
     parser.add_argument("--kicker", default="WORCADIAN · WORD OF THE DAY")
     parser.add_argument("--footer", default=None, help="Override the footer text (default: today's date)")
+    parser.add_argument("--palette", default=DEFAULT_PALETTE, choices=sorted(PALETTES))
     args = parser.parse_args()
 
     if args.output:
@@ -336,6 +373,7 @@ def _main() -> None:
         font_dir=args.font_dir,
         kicker=args.kicker,
         footer=args.footer,
+        palette=args.palette,
     )
     print(f"Wrote {path}")
 

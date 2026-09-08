@@ -192,6 +192,7 @@ class WordCardRequest(BaseModel):
     word: str
     part_of_speech: str | None = None
     definition: str | None = None
+    palette: str | None = None
 
 
 @app.post("/api/word-card")
@@ -204,9 +205,11 @@ def generate_word_card_endpoint(payload: WordCardRequest, request: Request) -> d
     if not payload.definition:
         raise HTTPException(status_code=400, detail="No definition available for this word.")
 
-    logger.info("word-card requested word=%s by=%s", payload.word, email)
+    logger.info("word-card requested word=%s palette=%s by=%s", payload.word, payload.palette, email)
     try:
-        png_bytes = generate_word_card_bytes(payload.word, payload.definition, part_of_speech=payload.part_of_speech)
+        png_bytes = generate_word_card_bytes(
+            payload.word, payload.definition, part_of_speech=payload.part_of_speech, palette=payload.palette
+        )
     except Exception as exc:
         logger.exception("word card generation failed word=%s", payload.word)
         raise HTTPException(status_code=500, detail=str(exc)) from exc

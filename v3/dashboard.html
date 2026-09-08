@@ -140,11 +140,31 @@
       font-size: 0.85rem;
       flex-shrink: 0;
     }
+    .card-row {
+      display: flex;
+      gap: 1rem;
+      align-items: flex-start;
+      flex-wrap: wrap;
+      margin-top: 0.4rem;
+    }
     #word-card {
       max-width: 100%;
+      flex: 1 1 260px;
       border: 1px solid var(--border);
       border-radius: 6px;
-      margin-top: 0.4rem;
+    }
+    .palette-buttons {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0.5rem;
+      flex: 0 0 auto;
+    }
+    .palette-swatch {
+      width: 36px;
+      height: 36px;
+      padding: 0;
+      border: 2px solid var(--border);
+      border-radius: 50%;
     }
   </style>
 </head>
@@ -190,7 +210,10 @@
 
       <div id="card-section" style="display: none; margin-top: 1.25rem;">
         <label for="word-card">Word Card</label>
-        <img id="word-card" alt="Word card" />
+        <div class="card-row">
+          <img id="word-card" alt="Word card" />
+          <div id="palette-buttons" class="palette-buttons"></div>
+        </div>
       </div>
     </div>
   </main>
@@ -207,20 +230,44 @@
     const freePosInput = document.getElementById("free-pos");
     const freeDefinitionInput = document.getElementById("free-definition");
     const freeEntryButton = document.getElementById("free-entry-button");
+    const paletteContainer = document.getElementById("palette-buttons");
 
-    async function generateCard(word, entry, button) {
-      const originalLabel = button.textContent;
-      button.disabled = true;
-      button.textContent = "Generating...";
+    // Matches worcadian_agent/image_card.py's PALETTES -- the color shown on
+    // each swatch is that palette's "accent" color.
+    const PALETTES = [
+      { name: "parchment", color: "#96682d" },
+      { name: "midnight", color: "#7aa2f7" },
+      { name: "forest", color: "#3a7d44" },
+      { name: "rose", color: "#bf6179" },
+      { name: "ocean", color: "#178aa8" },
+      { name: "sunset", color: "#db6e27" },
+      { name: "lavender", color: "#8b65c9" },
+      { name: "slate", color: "#567189" },
+      { name: "mustard", color: "#c4991d" },
+      { name: "crimson", color: "#b02a2a" },
+      { name: "mint", color: "#2d9774" },
+      { name: "charcoal", color: "#c8a03c" },
+    ];
+
+    // The word/part-of-speech/definition behind whatever card is currently
+    // shown, so a palette button can regenerate it without needing its own
+    // copy of that data.
+    let currentCardEntry = null;
+
+    async function generateCard(word, entry, button, palette) {
+      const isSwatch = button && button.classList.contains("palette-swatch");
+      const originalLabel = isSwatch ? null : button.textContent;
+      if (button) {
+        button.disabled = true;
+        if (!isSwatch) button.textContent = "Generating...";
+      }
+      const definition = entry.definition || entry.short_definition;
+      currentCardEntry = { word, part_of_speech: entry.part_of_speech, definition };
       try {
         const response = await fetch("/api/word-card", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            word,
-            part_of_speech: entry.part_of_speech,
-            definition: entry.definition || entry.short_definition,
-          }),
+          body: JSON.stringify({ word, part_of_speech: entry.part_of_speech, definition, palette }),
         });
         if (response.status === 401) {
           window.location.href = "/auth/login";
@@ -236,10 +283,32 @@
       } catch (err) {
         status.textContent = `Error generating card: ${err.message}`;
       } finally {
-        button.disabled = false;
-        button.textContent = originalLabel;
+        if (button) {
+          button.disabled = false;
+          if (!isSwatch) button.textContent = originalLabel;
+        }
       }
     }
+
+    function renderPaletteButtons() {
+      paletteContainer.innerHTML = "";
+      for (const p of PALETTES) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "palette-swatch";
+        button.style.background = p.color;
+        button.title = p.name.charAt(0).toUpperCase() + p.name.slice(1);
+        button.addEventListener("click", () => {
+          if (!currentCardEntry) {
+            status.textContent = "Generate a word card first, then choose a color palette.";
+            return;
+          }
+          generateCard(currentCardEntry.word, currentCardEntry, button, p.name);
+        });
+        paletteContainer.appendChild(button);
+      }
+    }
+    renderPaletteButtons();
 
     freeEntryButton.addEventListener("click", () => {
       const word = freeWordInput.value.trim();
@@ -300,6 +369,7 @@
       wordsUsedContainer.innerHTML = "";
       cardSection.style.display = "none";
       wordCard.src = "";
+      currentCardEntry = null;
 
       try {
         const response = await fetch("/api/press-release", {

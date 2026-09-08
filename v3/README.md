@@ -266,10 +266,13 @@ Project Settings → Environment Variables.
   `{part_of_speech, definition, short_definition}`. Used by the dashboard's
   "Execute Daily Tasks" button; does not send email or generate any word card.
 - `POST /api/word-card` — requires a valid session. Body
-  `{"word": ..., "part_of_speech": ..., "definition": ...}`; returns
+  `{"word": ..., "part_of_speech": ..., "definition": ..., "palette": ...}`
+  (`palette` is optional, one of `worcadian_agent/image_card.py`'s `PALETTES`
+  keys, default `"parchment"`; an unrecognized name silently falls back to
+  the default rather than erroring); returns
   `{"card_image": "data:image/png;base64,..."}`, rendered on demand by
-  `worcadian_agent/image_card.py`. Used by each "Generate Card" button on the
-  dashboard — nothing is persisted to disk.
+  `worcadian_agent/image_card.py`. Used by each "Generate Card" button and
+  the palette swatch buttons on the dashboard — nothing is persisted to disk.
 - `GET /api/cron/daily-tasks` — builds the press release for the current game
   day, looks up its words, and emails everything to `EMAIL_RECIPIENTS`. This
   is what the Vercel Cron Job calls; protected by the `CRON_SECRET` bearer
@@ -288,10 +291,16 @@ and an **Execute Daily Tasks** button that calls `POST /api/press-release`
 and populates two sections: **Seed Word** (the day's seed word, its part of
 speech, and a read-only definition box) and **Words Used** (every other
 looked-up word, most-to-least obscure, each with its own definition box and
-a **Generate Card** button). Clicking that button calls `POST /api/word-card`
-for just that word and displays the result in the **Word Card** section
-below. If the session has expired, either action redirects to `/auth/login`
-instead of showing an error.
+a **Generate Card** button), plus a **Free Entry** section (word, type of
+word, and definition fields with its own **Generate Card** button, for any
+word not looked up automatically). Clicking a "Generate Card" button calls
+`POST /api/word-card` for just that word and displays the result in the
+**Word Card** section below, alongside a dozen color-swatch buttons — one
+per palette in `worcadian_agent/image_card.py`'s `PALETTES` — that
+regenerate the *currently shown* card in that palette (they act on whatever
+word/definition produced the card last, not a fixed word). If the session
+has expired, any of these actions redirects to `/auth/login` instead of
+showing an error.
 
 The favicon (both pages) is the Worcadian logo, loaded directly from
 `https://whatgamestudios.com/worcadian/worcadian-logo.png`.
