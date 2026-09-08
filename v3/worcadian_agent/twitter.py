@@ -123,7 +123,11 @@ def exchange_code_for_tokens(code: str, code_verifier: str) -> None:
     logger.info("X OAuth2: initial authorization succeeded")
 
 
-def _refresh_access_token(refresh_token: str) -> str:
+def refresh_access_token(refresh_token: str) -> str:
+    """Exchange `refresh_token` for a fresh access token, persisting the (rotated)
+    result. Public because it doubles as the one-time seeding operation for an
+    access/refresh token pair generated directly in console.x.com, rather than
+    through the /api/x/authorize browser flow -- see scripts/seed_x_tokens.py."""
     logger.info("X OAuth2: refreshing access token")
     payload = _token_request({"grant_type": "refresh_token", "refresh_token": refresh_token})
     return _save_token_payload(payload)
@@ -136,7 +140,7 @@ def _get_valid_access_token() -> str:
             "X is not connected yet. Visit /api/x/authorize (while logged in) to authorize this app once."
         )
     if datetime.now(timezone.utc) >= tokens["expires_at"] - timedelta(seconds=EXPIRY_SAFETY_MARGIN_SECONDS):
-        return _refresh_access_token(tokens["refresh_token"])
+        return refresh_access_token(tokens["refresh_token"])
     return tokens["access_token"]
 
 
@@ -163,7 +167,7 @@ def post_tweet(text: str) -> dict:
         tokens = token_store.load_tokens()
         if tokens is None:
             raise RuntimeError("X is not connected. Visit /api/x/authorize (while logged in) to authorize this app.")
-        access_token = _refresh_access_token(tokens["refresh_token"])
+        access_token = refresh_access_token(tokens["refresh_token"])
         resp = _post(access_token, text)
 
     if not resp.ok:

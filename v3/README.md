@@ -208,12 +208,24 @@ close to expiring (`worcadian_agent/twitter.py`).
 4. Set env vars: `X_API_KEY` (Client ID), `X_API_SECRET` (Client Secret),
    and `DATABASE_URL` (a Neon connection string, e.g.
    `postgresql://user:password@host/dbname?sslmode=require`).
-5. **One-time setup**, after deploying with the above set: while logged into
-   the dashboard, visit `/api/x/authorize` (there's also a "Connect X
-   account" link next to the Tweet section) and approve access on X. The
-   resulting token pair is stored automatically — nothing further to
-   configure. Redo this only if access is ever revoked or the refresh token
-   expires from months of disuse.
+5. **One-time setup**, after deploying with the above set — either:
+   - While logged into the dashboard, visit `/api/x/authorize` (there's also
+     a "Connect X account" link next to the Tweet section) and approve
+     access on X. The resulting token pair is stored automatically; or
+   - If console.x.com's portal already generated an Access Token + Refresh
+     Token pair directly for you (some app configurations offer this
+     alongside the Client ID/Secret, skipping the browser flow), seed the
+     database with it instead:
+     ```bash
+     python scripts/seed_x_tokens.py "<refresh token from console.x.com>"
+     ```
+     (run locally, with `DATABASE_URL` pointed at the same database the
+     deployment uses — the *access* token from the portal is never used
+     directly, since it's already short-lived; this exchanges the refresh
+     token for a fresh pair, which also proves it's valid).
+
+   Nothing further to configure either way. Redo this only if access is
+   ever revoked or the refresh token expires from months of disuse.
 
 Posting (and the one-time `/api/x/authorize` step) is gated by the same
 OAuth session as the rest of the dashboard — anyone who can reach it is
