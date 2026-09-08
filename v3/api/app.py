@@ -357,8 +357,9 @@ def instagram_authorize(request: Request):
 
     state = new_instagram_state()
     request.session["instagram_oauth_state"] = state
-    logger.info("instagram-authorize started by=%s", email)
-    return RedirectResponse(url=build_instagram_authorize_url(state))
+    authorize_url = build_instagram_authorize_url(state)
+    logger.info("instagram-authorize started by=%s url=%s", email, authorize_url)
+    return RedirectResponse(url=authorize_url)
 
 
 @app.get("/api/instagram/callback")

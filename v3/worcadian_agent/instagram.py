@@ -11,8 +11,10 @@ Flow:
        (~60 days) and persists it (see token_store.py)
     4. post_image(image_url, caption) -- creates a media container from a
        PUBLIC image URL (Instagram's API fetches it directly; it does not
-       accept uploaded bytes) and publishes it, refreshing the long-lived
-       token first if it's getting close to expiry
+       accept uploaded bytes), polls it until Instagram has finished
+       fetching/processing the image (even single-image containers aren't
+       necessarily publishable instantly), then publishes it -- refreshing
+       the long-lived token first if it's getting close to expiry
 
 Unlike X's OAuth2 refresh token (which rotates and is invalidated on every
 use), Instagram's long-lived token is refreshed "in place": the same token
@@ -37,6 +39,7 @@ from __future__ import annotations
 import logging
 import os
 import secrets
+import time
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 
@@ -59,6 +62,15 @@ SCOPES = "instagram_business_basic,instagram_business_content_publish"
 # Instagram allows refreshing any time after the token is 24h old and before
 # it expires, so this leaves a comfortable margin either side.
 REFRESH_WHEN_DAYS_REMAINING = 7
+
+# Even a single *image* container (not just video) isn't necessarily
+# publishable the instant it's created -- Instagram fetches and processes
+# the image from image_url asynchronously, and media_publish fails with
+# "Media ID is not available" (error_subcode 2207027) if called too soon.
+# Poll the container's status_code until it's FINISHED, rather than assuming
+# it's ready right away.
+MEDIA_READY_POLL_INTERVAL_SECONDS = 1.5
+MEDIA_READY_MAX_ATTEMPTS = 20
 
 
 def _required_env(name: str) -> str:
@@ -157,6 +169,33 @@ def _refresh_if_needed(tokens: dict) -> dict:
     return token_store.load_instagram_tokens()
 
 
+def _wait_until_media_ready(creation_id: str, access_token: str) -> None:
+    """Poll the media container's status_code until Instagram has finished
+    fetching/processing the image from image_url, raising if it errors out
+    or doesn't become ready within MEDIA_READY_MAX_ATTEMPTS."""
+    for attempt in range(1, MEDIA_READY_MAX_ATTEMPTS + 1):
+        resp = requests.get(
+            f"{GRAPH_BASE}/{creation_id}",
+            params={"fields": "status_code", "access_token": access_token},
+            timeout=15,
+        )
+        if resp.ok:
+            status_code = resp.json().get("status_code")
+            logger.info("Instagram media container %s status=%s (attempt %d/%d)", creation_id, status_code, attempt, MEDIA_READY_MAX_ATTEMPTS)
+            if status_code == "FINISHED":
+                return
+            if status_code == "ERROR":
+                raise RuntimeError(f"Instagram failed to process the image (creation_id={creation_id}).")
+        else:
+            logger.warning(
+                "Instagram media status check failed status=%s body=%s (attempt %d/%d)",
+                resp.status_code, resp.text[:300], attempt, MEDIA_READY_MAX_ATTEMPTS,
+            )
+        if attempt < MEDIA_READY_MAX_ATTEMPTS:
+            time.sleep(MEDIA_READY_POLL_INTERVAL_SECONDS)
+    raise RuntimeError(f"Instagram media container {creation_id} did not become ready in time.")
+
+
 def post_image(image_url: str, caption: str = "") -> dict:
     """Publish `image_url` (must be a public, fetchable HTTPS URL) to Instagram.
     Returns the created post's data ({"id": ...})."""
@@ -179,6 +218,8 @@ def post_image(image_url: str, caption: str = "") -> dict:
         logger.error("Instagram media creation failed status=%s body=%s", create_resp.status_code, create_resp.text[:500])
         raise RuntimeError(f"Instagram API error {create_resp.status_code}: {create_resp.text[:300]}")
     creation_id = create_resp.json()["id"]
+
+    _wait_until_media_ready(creation_id, access_token)
 
     logger.info("publishing Instagram media creation_id=%s", creation_id)
     publish_resp = requests.post(
