@@ -31,6 +31,11 @@ Routes:
     POST /api/instagram-post    post the current word card image to Instagram; requires a session
     GET  /api/instagram/authorize  one-time: starts Instagram's OAuth flow; requires a session
     GET  /api/instagram/callback   Instagram redirects back here; requires a session
+    GET  /api/instagram/webhook    Meta's webhook verification handshake; PUBLIC,
+                                 no session -- required to save a Webhooks
+                                 config in the Meta console, even though this
+                                 app doesn't act on any events
+    POST /api/instagram/webhook    acknowledges webhook event deliveries (ignored); PUBLIC
     GET  /api/images/{image_id}    serves a temporarily-hosted image; PUBLIC,
                                  no session -- Instagram's own servers fetch it
     GET  /api/cron/daily-tasks  the scheduled daily_tasks job; protected by
@@ -59,7 +64,7 @@ logger = logging.getLogger("worcadian_agent.api")
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from pydantic import BaseModel
 
 load_dotenv()
@@ -384,6 +389,37 @@ def instagram_callback(request: Request):
 
     logger.info("instagram-callback: authorization succeeded by=%s", email)
     return HTMLResponse("<p>Instagram account connected. You can close this tab and return to the dashboard.</p>")
+
+
+@app.get("/api/instagram/webhook")
+def instagram_webhook_verify(request: Request):
+    """Meta's webhook verification handshake. Deliberately PUBLIC (no session
+    check) -- Meta calls this directly, server-to-server, with no browser or
+    session involved. This app doesn't process any webhook events (it only
+    posts content); Meta's console still requires a working verification
+    endpoint before it'll let you save a Webhooks configuration at all, so
+    this exists purely to satisfy that, echoing back hub.challenge once
+    hub.verify_token matches INSTAGRAM_WEBHOOK_VERIFY_TOKEN."""
+    mode = request.query_params.get("hub.mode")
+    token = request.query_params.get("hub.verify_token")
+    challenge = request.query_params.get("hub.challenge")
+    expected_token = os.getenv("INSTAGRAM_WEBHOOK_VERIFY_TOKEN")
+
+    if mode == "subscribe" and expected_token and token == expected_token:
+        logger.info("instagram webhook verification succeeded")
+        return PlainTextResponse(challenge or "")
+
+    logger.warning("instagram webhook verification failed mode=%s token_match=%s", mode, token == expected_token)
+    raise HTTPException(status_code=403, detail="Verification failed.")
+
+
+@app.post("/api/instagram/webhook")
+def instagram_webhook_event() -> dict:
+    """Acknowledges webhook event deliveries. This app doesn't act on any of
+    them (no comment/message handling) -- it just needs to return 200 so
+    Meta doesn't disable the subscription after repeated failures."""
+    logger.info("instagram webhook event received (ignored)")
+    return {"status": "ok"}
 
 
 @app.get("/api/images/{image_id}")

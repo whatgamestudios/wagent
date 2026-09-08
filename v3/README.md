@@ -255,10 +255,21 @@ to fetch.
 2. In that product's settings, add
    `<PUBLIC_BASE_URL>/api/instagram/callback` as a valid **OAuth redirect
    URI** (must match `PUBLIC_BASE_URL` exactly).
-3. Copy the **Instagram App ID** and **Instagram App Secret**.
-4. Set env vars: `INSTAGRAM_APP_ID`, `INSTAGRAM_APP_SECRET`. `DATABASE_URL`
-   is shared with the X integration above — no separate database needed.
-5. **One-time setup**, after deploying with the above set: while logged into
+3. The console also requires a **Webhooks** configuration (Callback URL +
+   Verify Token) to save the product setup at all, even though this app
+   never acts on any webhook events — it only posts content. Set
+   `<PUBLIC_BASE_URL>/api/instagram/webhook` as the **Callback URL**, and
+   any secret string of your choosing as the **Verify token** (generate one
+   with `python -c "import secrets; print(secrets.token_urlsafe(24))"`) —
+   it must match `INSTAGRAM_WEBHOOK_VERIFY_TOKEN` below exactly.
+   `api/app.py`'s `GET /api/instagram/webhook` handles the verification
+   handshake automatically; `POST /api/instagram/webhook` just acknowledges
+   any event deliveries without acting on them.
+4. Copy the **Instagram App ID** and **Instagram App Secret**.
+5. Set env vars: `INSTAGRAM_APP_ID`, `INSTAGRAM_APP_SECRET`,
+   `INSTAGRAM_WEBHOOK_VERIFY_TOKEN`. `DATABASE_URL` is shared with the X
+   integration above — no separate database needed.
+6. **One-time setup**, after deploying with the above set: while logged into
    the dashboard, visit `/api/instagram/authorize` (there's also a "Connect
    Instagram account" link next to the Word Card section) and approve
    access. The resulting token is stored automatically.
@@ -338,6 +349,7 @@ vercel env add X_API_SECRET
 vercel env add DATABASE_URL
 vercel env add INSTAGRAM_APP_ID
 vercel env add INSTAGRAM_APP_SECRET
+vercel env add INSTAGRAM_WEBHOOK_VERIFY_TOKEN
 vercel deploy --prod
 ```
 
@@ -394,6 +406,12 @@ Project Settings → Environment Variables.
 - `GET /api/instagram/callback` — requires a valid session. Instagram
   redirects back here with the auth code; exchanges it for a long-lived
   access token and persists it.
+- `GET /api/instagram/webhook` — **public, no session required** (Meta calls
+  this server-to-server). Handles Meta's webhook verification handshake,
+  required to save a Webhooks config in the console at all — echoes back
+  `hub.challenge` if `hub.verify_token` matches `INSTAGRAM_WEBHOOK_VERIFY_TOKEN`.
+- `POST /api/instagram/webhook` — **public**. Acknowledges webhook event
+  deliveries without acting on any of them.
 - `GET /api/images/{image_id}` — **public, no session required** (Instagram's
   servers fetch this URL directly). Serves a temporarily-hosted image by its
   UUID; 404 for an unknown or malformed id.
