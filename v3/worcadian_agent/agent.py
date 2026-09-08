@@ -126,7 +126,7 @@ def gather_facts(day: int | None = None) -> dict:
 
     shared_words = find_shared_words(players, seed)
     notable_words = sorted(
-        (s for s in scores_by_word.values() if s["tier"] in ("WOW", "OBSCURE")),
+        (s for s in scores_by_word.values() if s["tier"] != "IGNORE"),
         key=lambda s: s["obscurity_score"],
         reverse=True,
     )
