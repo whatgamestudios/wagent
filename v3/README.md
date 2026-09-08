@@ -291,16 +291,19 @@ and an **Execute Daily Tasks** button that calls `POST /api/press-release`
 and populates two sections: **Seed Word** (the day's seed word, its part of
 speech, and a read-only definition box) and **Words Used** (every other
 looked-up word, most-to-least obscure, each with its own definition box and
-a **Generate Card** button), plus a **Free Entry** section (word, type of
-word, and definition fields with its own **Generate Card** button, for any
-word not looked up automatically). Clicking a "Generate Card" button calls
-`POST /api/word-card` for just that word and displays the result in the
-**Word Card** section below, alongside a dozen color-swatch buttons — one
-per palette in `worcadian_agent/image_card.py`'s `PALETTES` — that
-regenerate the *currently shown* card in that palette (they act on whatever
-word/definition produced the card last, not a fixed word). If the session
-has expired, any of these actions redirects to `/auth/login` instead of
-showing an error.
+**Generate Card**/**Tweet** buttons), plus a **Free Entry** section (word,
+type of word, and definition fields with its own **Generate Card**/**Tweet**
+buttons, for any word not looked up automatically). Clicking a "Generate
+Card" button calls `POST /api/word-card` for just that word and displays the
+result in the **Word Card** section below, alongside a dozen color-swatch
+buttons — one per palette in `worcadian_agent/image_card.py`'s `PALETTES` —
+that regenerate the *currently shown* card in that palette (they act on
+whatever word/definition produced the card last, not a fixed word). Clicking
+a "Tweet" button fills the **Tweet** section at the bottom with
+`Worcadian word of the day <WORD>: <definition>`, entirely client-side — no
+request is made and nothing is actually posted to Twitter/X. If the session
+has expired, any card-generating action redirects to `/auth/login` instead
+of showing an error.
 
 The favicon (both pages) is the Worcadian logo, loaded directly from
 `https://whatgamestudios.com/worcadian/worcadian-logo.png`.

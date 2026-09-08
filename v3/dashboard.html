@@ -135,7 +135,12 @@
       font-size: 0.9rem;
       margin-bottom: 0;
     }
-    .card-button {
+    .button-group {
+      display: flex;
+      gap: 0.5rem;
+      flex-shrink: 0;
+    }
+    .card-button, .tweet-button {
       padding: 0.3rem 0.7rem;
       font-size: 0.85rem;
       flex-shrink: 0;
@@ -206,7 +211,10 @@
       </div>
       <label for="free-definition">Definition</label>
       <textarea id="free-definition" style="min-height: 90px; margin-bottom: 0.75rem;" placeholder="Enter a definition"></textarea>
-      <button id="free-entry-button" type="button">Generate Card</button>
+      <div class="button-group">
+        <button id="free-entry-button" type="button">Generate Card</button>
+        <button id="free-entry-tweet-button" type="button" class="tweet-button">Tweet</button>
+      </div>
 
       <div id="card-section" style="display: none; margin-top: 1.25rem;">
         <label for="word-card">Word Card</label>
@@ -215,6 +223,9 @@
           <div id="palette-buttons" class="palette-buttons"></div>
         </div>
       </div>
+
+      <label style="margin-top: 1.25rem;">Tweet</label>
+      <textarea id="tweet-text" style="min-height: 90px;" placeholder="A candidate tweet will appear here."></textarea>
     </div>
   </main>
 
@@ -230,7 +241,9 @@
     const freePosInput = document.getElementById("free-pos");
     const freeDefinitionInput = document.getElementById("free-definition");
     const freeEntryButton = document.getElementById("free-entry-button");
+    const freeEntryTweetButton = document.getElementById("free-entry-tweet-button");
     const paletteContainer = document.getElementById("palette-buttons");
+    const tweetText = document.getElementById("tweet-text");
 
     // Matches worcadian_agent/image_card.py's PALETTES -- the color shown on
     // each swatch is that palette's "accent" color.
@@ -290,6 +303,20 @@
       }
     }
 
+    function buildTweetText(word, definition) {
+      return `Worcadian word of the day ${word}: ${definition}`;
+    }
+
+    function showTweet(word, entry) {
+      const definition = entry.definition || entry.short_definition;
+      if (!definition) {
+        status.textContent = "No definition available to tweet for this word.";
+        return;
+      }
+      tweetText.value = buildTweetText(word, definition);
+      tweetText.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+
     function renderPaletteButtons() {
       paletteContainer.innerHTML = "";
       for (const p of PALETTES) {
@@ -320,6 +347,16 @@
       generateCard(word, { part_of_speech: freePosInput.value.trim() || null, definition }, freeEntryButton);
     });
 
+    freeEntryTweetButton.addEventListener("click", () => {
+      const word = freeWordInput.value.trim();
+      const definition = freeDefinitionInput.value.trim();
+      if (!word || !definition) {
+        status.textContent = "Enter both a word and a definition first.";
+        return;
+      }
+      showTweet(word, { definition });
+    });
+
     function makeWordBox(word, entry) {
       const wrapper = document.createElement("div");
       wrapper.className = "definition-box";
@@ -331,12 +368,24 @@
       label.textContent = entry.part_of_speech ? `${word} (${entry.part_of_speech})` : word;
       row.appendChild(label);
 
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "card-button";
-      button.textContent = "Generate Card";
-      button.addEventListener("click", () => generateCard(word, entry, button));
-      row.appendChild(button);
+      const buttonGroup = document.createElement("div");
+      buttonGroup.className = "button-group";
+
+      const cardButton = document.createElement("button");
+      cardButton.type = "button";
+      cardButton.className = "card-button";
+      cardButton.textContent = "Generate Card";
+      cardButton.addEventListener("click", () => generateCard(word, entry, cardButton));
+      buttonGroup.appendChild(cardButton);
+
+      const tweetButton = document.createElement("button");
+      tweetButton.type = "button";
+      tweetButton.className = "tweet-button";
+      tweetButton.textContent = "Tweet";
+      tweetButton.addEventListener("click", () => showTweet(word, entry));
+      buttonGroup.appendChild(tweetButton);
+
+      row.appendChild(buttonGroup);
 
       const box = document.createElement("textarea");
       box.readOnly = true;
@@ -370,6 +419,7 @@
       cardSection.style.display = "none";
       wordCard.src = "";
       currentCardEntry = null;
+      tweetText.value = "";
 
       try {
         const response = await fetch("/api/press-release", {
